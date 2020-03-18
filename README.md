@@ -1,6 +1,6 @@
 # Flappy bird
 
-![](https://user-images.githubusercontent.com/39541807/76965819-b9b9c780-6903-11ea-8e08-a8d4f238be58.png)
+![flap](https://user-images.githubusercontent.com/39541807/76967365-1c13c780-6906-11ea-8f21-cd3e4b2f9474.gif)
 
 #### Objetivos para este pequeno projeto
 - [x] Criar o jogo
