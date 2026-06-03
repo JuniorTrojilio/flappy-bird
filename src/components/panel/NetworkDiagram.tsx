@@ -142,7 +142,8 @@ export function NetworkDiagram({
           y1: layout.input[i]!.y,
           x2: layout.hidden[j]!.x,
           y2: layout.hidden[j]!.y,
-          w: weights.ih[i * hiddenCount + j] ?? 0,
+          w:
+            weights.weightsInputToHidden[i * hiddenCount + j] ?? 0,
           fromInput: true,
           inputIdx: i,
           hiddenIdx: j,
@@ -155,7 +156,7 @@ export function NetworkDiagram({
         y1: layout.hidden[j]!.y,
         x2: layout.output[0]!.x,
         y2: layout.output[0]!.y,
-        w: weights.ho[j] ?? 0,
+        w: weights.weightsHiddenToOutput[j] ?? 0,
         fromInput: false,
         inputIdx: -1,
         hiddenIdx: j,

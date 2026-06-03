@@ -14,7 +14,10 @@ import {
   type InputMode,
   type NnArchitecture,
 } from '@/lib/nn-config'
-import type { NetworkSnapshot } from '@/lib/neural-network'
+import {
+  normalizeNetworkSnapshot,
+  type NetworkSnapshot,
+} from '@/lib/neural-network'
 
 const STORAGE_KEY = 'flappy-bird-nn-training'
 const PREFS_KEY = 'flappy-bird-nn-prefs'
@@ -135,27 +138,36 @@ export function loadTrainingState(): TrainingSaveData | null {
 
     const arch = architectureFromSave(data)
 
-    for (const net of data.networks) {
+    const networks: NetworkSnapshot[] = []
+    for (const raw of data.networks) {
+      const net = normalizeNetworkSnapshot(raw)
       if (
-        !Array.isArray(net.ih) ||
-        !Array.isArray(net.ho) ||
-        !Array.isArray(net.bh) ||
-        !Array.isArray(net.bo)
+        !Array.isArray(net.weightsInputToHidden) ||
+        !Array.isArray(net.weightsHiddenToOutput) ||
+        !Array.isArray(net.biasesHidden) ||
+        !Array.isArray(net.biasesOutput)
       ) {
         return null
       }
       if (!snapshotMatchesArchitecture(net, arch)) return null
+      networks.push(net)
     }
 
-    if (data.hallOfFameSnapshot) {
-      if (!snapshotMatchesArchitecture(data.hallOfFameSnapshot, arch)) {
-        data.hallOfFameSnapshot = null
+    let hallOfFameSnapshot: NetworkSnapshot | null | undefined =
+      data.hallOfFameSnapshot
+        ? normalizeNetworkSnapshot(data.hallOfFameSnapshot)
+        : null
+    if (hallOfFameSnapshot) {
+      if (!snapshotMatchesArchitecture(hallOfFameSnapshot, arch)) {
+        hallOfFameSnapshot = null
         data.hallOfFame = 0
       }
     }
 
     const normalized = {
       ...data,
+      networks,
+      hallOfFameSnapshot,
       historico: Array.isArray(data.historico) ? data.historico : [],
       inputMode: arch.inputMode,
       hiddenSize: arch.hiddenSize,
@@ -197,12 +209,12 @@ export function defaultSaveArchitecture(): NnArchitecture {
 }
 
 export function expectedSnapshotSizes(arch: NnArchitecture) {
-  const inSize = inputSizeFor(arch.inputMode)
-  const h = arch.hiddenSize
+  const inputCount = inputSizeFor(arch.inputMode)
+  const hiddenCount = arch.hiddenSize
   return {
-    ih: inSize * h,
-    ho: h * OUTPUT_SIZE,
-    bh: h,
-    bo: OUTPUT_SIZE,
+    weightsInputToHidden: inputCount * hiddenCount,
+    weightsHiddenToOutput: hiddenCount * OUTPUT_SIZE,
+    biasesHidden: hiddenCount,
+    biasesOutput: OUTPUT_SIZE,
   }
 }

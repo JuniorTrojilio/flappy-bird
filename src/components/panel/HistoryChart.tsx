@@ -3,11 +3,10 @@ import { cn } from '@/lib/utils'
 
 type HistoryChartProps = {
   serie: number[]
-  golden?: boolean
   className?: string
 }
 
-export function HistoryChart({ serie, golden, className }: HistoryChartProps) {
+export function HistoryChart({ serie, className }: HistoryChartProps) {
   const ref = useRef<HTMLCanvasElement>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
 
@@ -39,7 +38,7 @@ export function HistoryChart({ serie, golden, className }: HistoryChartProps) {
       if (serie.length === 1) {
         const x = w / 2
         const y = h - pad - (serie[0] / max) * (h - pad * 2)
-        ctx.fillStyle = golden ? '#fbbf24' : '#3b82f6'
+        ctx.fillStyle = '#3b82f6'
         ctx.beginPath()
         ctx.arc(x, y, 5, 0, Math.PI * 2)
         ctx.fill()
@@ -50,7 +49,7 @@ export function HistoryChart({ serie, golden, className }: HistoryChartProps) {
         return
       }
 
-      ctx.strokeStyle = golden ? '#fbbf24' : '#3b82f6'
+      ctx.strokeStyle = '#3b82f6'
       ctx.lineWidth = 2
       ctx.beginPath()
       serie.forEach((v, i) => {
@@ -64,7 +63,7 @@ export function HistoryChart({ serie, golden, className }: HistoryChartProps) {
       const last = serie[serie.length - 1]
       const lx = w - pad
       const ly = h - pad - (last / max) * (h - pad * 2)
-      ctx.fillStyle = golden ? '#fbbf24' : '#60a5fa'
+      ctx.fillStyle = '#60a5fa'
       ctx.beginPath()
       ctx.arc(lx, ly, 4, 0, Math.PI * 2)
       ctx.fill()
@@ -74,7 +73,7 @@ export function HistoryChart({ serie, golden, className }: HistoryChartProps) {
     const ro = new ResizeObserver(draw)
     ro.observe(wrap)
     return () => ro.disconnect()
-  }, [serie, golden])
+  }, [serie])
 
   return (
     <div ref={wrapRef} className={cn('h-full w-full', className)}>

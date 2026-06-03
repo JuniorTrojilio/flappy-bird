@@ -3,7 +3,10 @@
  * O painel e o localStorage usam esses valores.
  * Guia: docs/GUIA-DO-CODIGO.md
  */
-import type { NetworkSnapshot } from '@/lib/neural-network'
+import {
+  normalizeNetworkSnapshot,
+  type NetworkSnapshot,
+} from '@/lib/neural-network'
 
 export const OUTPUT_SIZE = 1
 export const BASE_INPUT_COUNT = 3
@@ -79,13 +82,14 @@ export function snapshotMatchesArchitecture(
   s: NetworkSnapshot,
   arch: NnArchitecture
 ): boolean {
-  const inSize = inputSizeFor(arch.inputMode)
-  const h = arch.hiddenSize
+  const inputCount = inputSizeFor(arch.inputMode)
+  const hiddenCount = arch.hiddenSize
+  const snapshot = normalizeNetworkSnapshot(s)
   return (
-    s.ih.length === inSize * h &&
-    s.ho.length === h * OUTPUT_SIZE &&
-    s.bh.length === h &&
-    s.bo.length === OUTPUT_SIZE
+    snapshot.weightsInputToHidden.length === inputCount * hiddenCount &&
+    snapshot.weightsHiddenToOutput.length === hiddenCount * OUTPUT_SIZE &&
+    snapshot.biasesHidden.length === hiddenCount &&
+    snapshot.biasesOutput.length === OUTPUT_SIZE
   )
 }
 

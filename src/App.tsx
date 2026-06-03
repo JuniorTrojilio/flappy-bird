@@ -7,7 +7,13 @@ import { useCallback, useRef, useState } from 'react'
 import { GameCanvas } from '@/components/GameCanvas'
 import { NeuralPanel } from '@/components/NeuralPanel'
 import { GAME_WIDTH } from '@/game/constants'
-import type { GameEngine, GameMode, NnConfigState } from '@/game/game-engine'
+import type {
+  ApplyChampionSnapshotOptions,
+  GameEngine,
+  GameMode,
+  NnConfigState,
+} from '@/game/game-engine'
+import type { NetworkSnapshot } from '@/lib/neural-network'
 import { clampPopulationSize } from '@/game/population-mode'
 import type { PanelState, PanelUiEvents } from '@/lib/panel-types'
 import {
@@ -20,7 +26,6 @@ import {
 const GAME_COLUMN_WIDTH = GAME_WIDTH + 48
 
 const initialUi: PanelUiEvents = {
-  flashRecord: 0,
   recordBanner: null,
   genScoreMsg: null,
   decisionFeedback: null,
@@ -106,6 +111,25 @@ export default function App() {
     []
   )
 
+  const handleApplyChampionWeights = useCallback(
+    (snapshot: NetworkSnapshot, options: ApplyChampionSnapshotOptions) => {
+      const ok =
+        engineRef.current?.applyChampionSnapshot(snapshot, options) ?? false
+      if (ok) {
+        onUiEvent({
+          genScoreMsg: '✓ Pesos manuais aplicados no campeão',
+        })
+        window.setTimeout(() => onUiEvent({ genScoreMsg: null }), 2500)
+      }
+      return ok
+    },
+    [onUiEvent]
+  )
+
+  const handleCopyChampionWeights = useCallback(() => {
+    return engineRef.current?.getChampionSnapshotJson() ?? null
+  }, [])
+
   const handleClearTraining = useCallback(() => {
     if (
       !window.confirm(
@@ -176,6 +200,8 @@ export default function App() {
           onPopulationChange={handlePopulationApply}
           nnConfig={nnConfig}
           onNnConfigApply={handleNnConfigApply}
+          onApplyChampionWeights={handleApplyChampionWeights}
+          onCopyChampionWeights={handleCopyChampionWeights}
           onPlayerRestart={() => engineRef.current?.playerFlap()}
         />
       </main>

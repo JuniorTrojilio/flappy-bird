@@ -134,7 +134,10 @@ Configuração escolhida no painel:
 - Mapas por pássaro no fim da geração: 1, 3, 5 ou 10
 
 ### `src/lib/neural-network.ts`
-Rede **feedforward** com sigmoid:
+Rede **feedforward** com sigmoid (nomes completos, sem abreviações):
+- `weightsInputToHidden` — pesos entrada → oculta
+- `weightsHiddenToOutput` — pesos oculta → saída
+- `biasesHidden` / `biasesOutput` — vieses (bias)
 - `forward()` — calcula se bate asa ou não
 - `mutate()` — altera pesos aleatoriamente
 - `toSnapshot()` / `loadSnapshot()` — copiar rede para salvar ou clonar
@@ -154,6 +157,12 @@ Tipos TypeScript do que o painel mostra (`PanelState`, progresso, evolução…)
 
 ### `src/components/NeuralPanel.tsx`
 Layout do painel: botões IA/Jogador, velocidade, limpar treino, blocos de informação.
+
+### `src/components/panel/ChampionWeightsImporter.tsx`
+**Informar pesos do campeão** — cola JSON com todos os pesos/vieses; o pássaro 0 passa a usar essa rede. Botão “Copiar campeão atual” exporta o JSON. Os 3 números do bloco Pesos (média) não bastam para reconstruir o cérebro inteiro.
+
+### `src/lib/network-snapshot-import.ts`
+Valida o JSON colado (tamanhos certos para a arquitetura 3→4→1, etc.).
 
 ### `src/components/panel/AiSensesBlock.tsx`
 **“O que a IA vê”** — barras de Cano, Abertura, Queda (+ Cano+1, Fenda+1 se modo completo).

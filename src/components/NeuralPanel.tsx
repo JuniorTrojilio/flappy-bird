@@ -10,6 +10,9 @@ import { Progress } from '@/components/ui/progress'
 import { EvolutionSection } from '@/components/panel/EvolutionSection'
 import { ProgressBlock } from '@/components/panel/ProgressBlock'
 import { AiSensesBlock } from '@/components/panel/AiSensesBlock'
+import { ChampionWeightsImporter } from '@/components/panel/ChampionWeightsImporter'
+import type { ApplyChampionSnapshotOptions } from '@/game/game-engine'
+import type { NetworkSnapshot } from '@/lib/neural-network'
 import { NetworkConfigPicker } from '@/components/panel/NetworkConfigPicker'
 import { NetworkDiagram } from '@/components/panel/NetworkDiagram'
 import { PopulationInput } from '@/components/panel/PopulationInput'
@@ -35,6 +38,11 @@ type NeuralPanelProps = {
   onPopulationChange: (n: number) => void
   nnConfig: NnConfigState
   onNnConfigApply: (config: NnConfigState) => void
+  onApplyChampionWeights: (
+    snapshot: NetworkSnapshot,
+    options: ApplyChampionSnapshotOptions
+  ) => boolean
+  onCopyChampionWeights: () => string | null
   onPlayerRestart: () => void
 }
 
@@ -72,6 +80,8 @@ export function NeuralPanel({
   onPopulationChange,
   nnConfig,
   onNnConfigApply,
+  onApplyChampionWeights,
+  onCopyChampionWeights,
   onPlayerRestart,
 }: NeuralPanelProps) {
   const [highlightHidden, setHighlightHidden] = useState<number | null>(null)
@@ -93,18 +103,10 @@ export function NeuralPanel({
         ? 'bg-emerald-500'
         : 'bg-amber-500'
 
-  const flashRecord = ui.flashRecord > 0 && Date.now() - ui.flashRecord < 2000
   const isPlayer = gameMode === 'player' || state.modoJogador
 
   return (
     <div className="panel-mono relative flex h-full min-h-0 flex-col overflow-hidden bg-background">
-      {flashRecord && (
-        <div
-          className="pointer-events-none absolute inset-0 z-10 panel-flash-record"
-          aria-hidden
-        />
-      )}
-
       {/* Barra superior: stats + controles */}
       <header className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-b border-border px-3 py-2">
         <span className="text-xs font-bold text-foreground">
@@ -260,7 +262,7 @@ export function NeuralPanel({
         <PanelBlock title="⚡ Decisão" className="border-primary/25 bg-card/90">
           <div className="flex h-full flex-col gap-1.5">
             <p className="text-[10px] tabular-nums text-muted-foreground">
-              z = {slow.calculo.z.toFixed(2)}
+              soma = {slow.calculo.somaSaidaAntesSigmoid.toFixed(2)}
             </p>
             <div className="flex items-center gap-1.5 text-[10px]">
               <Progress
@@ -298,17 +300,17 @@ export function NeuralPanel({
             </p>
             <WeightRow
               label="Cano"
-              value={state.pesos.w_distancia}
+              value={state.pesos.pesoDistancia}
               pulse={state.pesoMudou}
             />
             <WeightRow
               label="Altura"
-              value={state.pesos.w_altura}
+              value={state.pesos.pesoAltura}
               pulse={state.pesoMudou}
             />
             <WeightRow
               label="Queda"
-              value={state.pesos.w_velocidade}
+              value={state.pesos.pesoVelocidade}
               pulse={state.pesoMudou}
             />
 
@@ -319,17 +321,17 @@ export function NeuralPanel({
                 </p>
                 <WeightRow
                   label="Cano"
-                  value={state.campeaoHistorico.pesos.w_distancia}
+                  value={state.campeaoHistorico.pesos.pesoDistancia}
                   variant="hall"
                 />
                 <WeightRow
                   label="Altura"
-                  value={state.campeaoHistorico.pesos.w_altura}
+                  value={state.campeaoHistorico.pesos.pesoAltura}
                   variant="hall"
                 />
                 <WeightRow
                   label="Queda"
-                  value={state.campeaoHistorico.pesos.w_velocidade}
+                  value={state.campeaoHistorico.pesos.pesoVelocidade}
                   variant="hall"
                 />
               </>
@@ -339,6 +341,11 @@ export function NeuralPanel({
                 registrar um campeão.
               </p>
             )}
+            <ChampionWeightsImporter
+              nnConfig={nnConfig}
+              onApply={onApplyChampionWeights}
+              onCopyCurrent={onCopyChampionWeights}
+            />
           </div>
         </PanelBlock>
 
@@ -352,7 +359,6 @@ export function NeuralPanel({
             vivos={state.progresso.vivos}
             melhorGeracao={state.progresso.melhorGeracao}
             mediaGeracao={state.progresso.mediaGeracao}
-            golden={flashRecord}
           />
         </PanelBlock>
 

@@ -17,7 +17,6 @@ type ProgressBlockProps = {
   vivos: number
   melhorGeracao: number
   mediaGeracao: number
-  golden?: boolean
 }
 
 const trendStyles: Record<
@@ -39,7 +38,6 @@ export function ProgressBlock({
   vivos,
   melhorGeracao,
   mediaGeracao,
-  golden,
 }: ProgressBlockProps) {
   const trend = computeProgressTrend(historico.length >= 2 ? historico : serieGrafico)
   const { variant, icon: Icon } = trendStyles[trend]
@@ -68,7 +66,6 @@ export function ProgressBlock({
 
       <HistoryChart
         serie={serieGrafico}
-        golden={golden}
         className="min-h-[5rem] flex-1 rounded bg-secondary/40"
       />
 

@@ -85,7 +85,7 @@ export function evolvePopulation(
     next.push(child)
   }
 
-  const arch = population[0]?.arch
+  const arch = population[0]?.architecture
   while (next.length < n) {
     next.push(arch ? new NeuralNetwork(arch) : new NeuralNetwork())
   }

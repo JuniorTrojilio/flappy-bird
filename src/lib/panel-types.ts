@@ -8,13 +8,14 @@ export interface PanelInputs {
 }
 
 export interface PanelPesos {
-  w_distancia: number
-  w_altura: number
-  w_velocidade: number
+  pesoDistancia: number
+  pesoAltura: number
+  pesoVelocidade: number
 }
 
 export interface PanelCalculo {
-  z: number
+  /** Soma ponderada na saída antes da função sigmoid (valor “bruto”). */
+  somaSaidaAntesSigmoid: number
   confianca: number
   decisao: 'bate' | 'nao_bate'
 }
@@ -91,7 +92,10 @@ export interface PanelState {
   calculo: PanelCalculo
   progresso: PanelProgresso
   diagram: { inputs: number[]; hidden: number[]; output: number[] }
-  weights: { ih: number[]; ho: number[] }
+  weights: {
+    weightsInputToHidden: number[]
+    weightsHiddenToOutput: number[]
+  }
   hiddenDetail: HiddenNeuronDetail[]
   evolucao: PanelEvolucao
   pesoMudou: boolean
@@ -102,7 +106,6 @@ export interface PanelState {
 }
 
 export interface PanelUiEvents {
-  flashRecord: number
   recordBanner: string | null
   genScoreMsg: string | null
   decisionFeedback: { shouldFlap: boolean } | null

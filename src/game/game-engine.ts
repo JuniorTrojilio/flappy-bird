@@ -21,12 +21,15 @@ import {
 import {
   architectureLabel,
   defaultArchitecture,
+  snapshotMatchesArchitecture,
   type EvalSeedOption,
   type NnArchitecture,
 } from '@/lib/nn-config'
+import { championSnapshotToJson } from '@/lib/network-snapshot-import'
 import {
   aggregatedInputWeightsFromSnapshot,
   NeuralNetwork,
+  normalizeNetworkSnapshot,
   type NetworkSnapshot,
 } from '@/lib/neural-network'
 import type { PanelState, PanelUiEvents } from '@/lib/panel-types'
@@ -65,6 +68,13 @@ export type RestoredTrainingInfo = {
 export type NnConfigState = {
   architecture: NnArchitecture
   evalSeeds: EvalSeedOption
+}
+
+export type ApplyChampionSnapshotOptions = {
+  /** Grava o mesmo genoma no hall of fame. */
+  registerHallOfFame?: boolean
+  /** Pontuação do hall (se vazio, usa o recorde atual). */
+  hallScore?: number
 }
 
 export type GameEngineCallbacks = {
@@ -328,6 +338,52 @@ export class GameEngine {
     }
   }
 
+  /** JSON dos pesos do campeão que está jogando agora (para copiar ou editar). */
+  getChampionSnapshotJson(): string {
+    return championSnapshotToJson(
+      this.population.getChampionNetwork().toSnapshot()
+    )
+  }
+
+  /**
+   * Substitui os pesos do campeão (pássaro 0) por um snapshot informado manualmente.
+   * A rede passa a decidir com esses pesos no próximo forward().
+   */
+  applyChampionSnapshot(
+    snapshot: NetworkSnapshot,
+    options?: ApplyChampionSnapshotOptions
+  ): boolean {
+    if (this.playerMode || this.population.size === 0) return false
+
+    const architecture = this.population.getArchitecture()
+    const normalized = normalizeNetworkSnapshot(snapshot)
+    if (!snapshotMatchesArchitecture(normalized, architecture)) return false
+
+    const champion = new NeuralNetwork(architecture)
+    if (!champion.loadSnapshot(normalized)) return false
+
+    this.population.networks[0] = champion
+    this.population.championIndex = 0
+    this.population.setRankedSnapshot(0, normalized)
+
+    if (options?.registerHallOfFame) {
+      const score =
+        options.hallScore != null && options.hallScore > 0
+          ? Math.round(options.hallScore)
+          : this.training.recorde
+      if (score > 0) {
+        this.hallOfFameScore = Math.max(this.hallOfFameScore, score)
+        this.hallOfFameSnapshot = normalized
+      }
+    }
+
+    this.syncDisplayFromChampion()
+    if (this.persistTrainingEnabled) {
+      queueMicrotask(() => this.saveTraining())
+    }
+    return true
+  }
+
   /**
    * Troca tamanho da rede / entradas / seeds de avaliação.
    * Reinicia aprendizado salvo se a arquitetura mudar (incompatível com snapshots).
@@ -577,7 +633,7 @@ export class GameEngine {
       arquitetura: {
         label: architectureLabel(arch),
         inputMode: arch.inputMode,
-        inputSize: this.displayNn.inputSize,
+        inputSize: this.displayNn.inputCount,
         hiddenSize: arch.hiddenSize,
         evalSeeds: this.population.getEvalSeedCount(),
       },
@@ -619,7 +675,6 @@ export class GameEngine {
     if (score > this.training.recorde) {
       this.training.recorde = score
       this.callbacks.onUiEvent({
-        flashRecord: Date.now(),
         recordBanner: `🏆 NOVO RECORDE: ${score}`,
       })
       setTimeout(() => this.callbacks.onUiEvent({ recordBanner: null }), 2000)
@@ -758,7 +813,6 @@ export class GameEngine {
     if (visualBest > this.training.recorde) {
       this.training.recorde = visualBest
       this.callbacks.onUiEvent({
-        flashRecord: Date.now(),
         recordBanner: `🏆 NOVO RECORDE: ${visualBest}`,
       })
       setTimeout(() => this.callbacks.onUiEvent({ recordBanner: null }), 2000)

@@ -30,7 +30,7 @@ Configurável via painel (`src/lib/nn-config.ts`):
 
 Topologia: **entrada → oculta (sigmoid) → saída (sigmoid)**. Decisão: `output > 0.5` → bater asa.
 
-Implementação: `src/lib/neural-network.ts` — pesos em `Float32Array`, índice `ih[i * hiddenSize + j]`.
+Implementação: `src/lib/neural-network.ts` — pesos em `Float32Array`, índice `weightsInputToHidden[inputIndex * hiddenCount + hiddenIndex]`. Saves antigos (`ih`/`ho`/`bh`/`bo`) são migrados por `normalizeNetworkSnapshot`.
 
 ### Entradas (`src/game/nn-inputs.ts`)
 
