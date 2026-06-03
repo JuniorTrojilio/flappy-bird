@@ -16,6 +16,21 @@ export interface PanelCalculo {
   decisao: 'bate' | 'nao_bate'
 }
 
+export interface PanelArquitetura {
+  label: string
+  inputMode: 'basic' | 'extended'
+  inputSize: number
+  hiddenSize: number
+  evalSeeds: number
+}
+
+export interface PanelGeneralizacao {
+  evalSeeds: number
+  melhorVisual: number
+  melhorFitness: number
+  mediaFitness: number
+}
+
 export interface PanelProgresso {
   geracao: number
   pontuacao: number
@@ -64,6 +79,8 @@ export interface PanelCampeaoHistorico {
 
 export interface PanelState {
   inputs: PanelInputs
+  arquitetura: PanelArquitetura
+  generalizacao: PanelGeneralizacao | null
   /** Campeão que está jogando / sendo exibido agora. */
   pesos: PanelPesos
   /** Melhor campeão da história (hall of fame), se existir. */

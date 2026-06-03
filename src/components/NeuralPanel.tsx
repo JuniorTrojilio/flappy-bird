@@ -10,8 +10,10 @@ import {
   MetricBar,
   velStatus,
 } from '@/components/panel/MetricBar'
+import { NetworkConfigPicker } from '@/components/panel/NetworkConfigPicker'
 import { NetworkDiagram } from '@/components/panel/NetworkDiagram'
 import { PopulationInput } from '@/components/panel/PopulationInput'
+import type { NnConfigState } from '@/game/game-engine'
 import type { PanelState, PanelUiEvents } from '@/lib/panel-types'
 import { cn } from '@/lib/utils'
 import type { GameMode } from '@/game/game-engine'
@@ -32,6 +34,8 @@ type NeuralPanelProps = {
   onClearTraining: () => void
   populationSize: number
   onPopulationChange: (n: number) => void
+  nnConfig: NnConfigState
+  onNnConfigApply: (config: NnConfigState) => void
   onPlayerRestart: () => void
 }
 
@@ -69,6 +73,8 @@ export function NeuralPanel({
   onClearTraining,
   populationSize,
   onPopulationChange,
+  nnConfig,
+  onNnConfigApply,
   onPlayerRestart,
 }: NeuralPanelProps) {
   const [highlightHidden, setHighlightHidden] = useState<number | null>(null)
@@ -120,6 +126,11 @@ export function NeuralPanel({
         {!isPlayer && state.progresso.hallOfFame > 0 && (
           <span className="text-[10px] tabular-nums text-amber-400/90">
             hall {state.progresso.hallOfFame}
+          </span>
+        )}
+        {!isPlayer && (
+          <span className="font-mono text-[10px] text-muted-foreground">
+            {state.arquitetura.label}
           </span>
         )}
         {!isPlayer && (
@@ -242,7 +253,21 @@ export function NeuralPanel({
           </p>
         </div>
       ) : (
-      <div className="grid min-h-0 flex-1 grid-cols-3 grid-rows-2 gap-2 p-2">
+      <div className="grid min-h-0 flex-1 grid-cols-3 grid-rows-[auto_1fr_1fr] gap-2 p-2">
+        <PanelBlock title="🔧 Arquitetura & generalização" className="col-span-3">
+          <NetworkConfigPicker config={nnConfig} onApply={onNnConfigApply} />
+          {state.generalizacao && state.generalizacao.evalSeeds > 1 && (
+            <p className="mt-1.5 text-[9px] tabular-nums text-muted-foreground">
+              Última geração: fitness{' '}
+              <span className="text-sky-400">
+                {state.generalizacao.melhorFitness.toFixed(1)}
+              </span>{' '}
+              (média {state.generalizacao.evalSeeds} circuitos) · partida visível{' '}
+              {state.generalizacao.melhorVisual}
+            </p>
+          )}
+        </PanelBlock>
+
         <PanelBlock title="👁 O que a IA vê">
           <div className="space-y-1.5">
             <MetricBar

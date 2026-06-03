@@ -1,9 +1,10 @@
 import {
-  HIDDEN_SIZE,
-  INPUT_LABELS,
-  INPUT_SIZE,
+  defaultArchitecture,
+  inputLabelsFor,
+  inputSizeFor,
   OUTPUT_SIZE,
-} from '@/lib/nn-architecture'
+  type NnArchitecture,
+} from '@/lib/nn-config'
 import { clamp } from '@/lib/utils'
 
 export type NetworkSnapshot = {
@@ -21,15 +22,20 @@ function sigmoidDerivative(x: number) {
   return x * (1 - x)
 }
 
-/** Média dos pesos entrada→oculta por sentido (mesma leitura do painel). */
-export function aggregatedInputWeightsFromSnapshot(s: NetworkSnapshot) {
+/** Média dos pesos entrada→oculta por sentido (painel — só 3 primeiros sentidos). */
+export function aggregatedInputWeightsFromSnapshot(
+  s: NetworkSnapshot,
+  arch: NnArchitecture
+) {
+  const inSize = inputSizeFor(arch.inputMode)
+  const h = arch.hiddenSize
   const w = [0, 0, 0]
-  for (let i = 0; i < INPUT_SIZE; i++) {
+  for (let i = 0; i < Math.min(3, inSize); i++) {
     let sum = 0
-    for (let j = 0; j < HIDDEN_SIZE; j++) {
-      sum += s.ih[i * HIDDEN_SIZE + j]
+    for (let j = 0; j < h; j++) {
+      sum += s.ih[i * h + j]
     }
-    w[i] = sum / HIDDEN_SIZE
+    w[i] = sum / h
   }
   return {
     w_distancia: clamp(w[0], -2, 2),
@@ -39,23 +45,39 @@ export function aggregatedInputWeightsFromSnapshot(s: NetworkSnapshot) {
 }
 
 export class NeuralNetwork {
-  ih = new Float32Array(INPUT_SIZE * HIDDEN_SIZE)
-  ho = new Float32Array(HIDDEN_SIZE * OUTPUT_SIZE)
-  bh = new Float32Array(HIDDEN_SIZE)
-  bo = new Float32Array(OUTPUT_SIZE)
-  inputs = new Float32Array(INPUT_SIZE)
-  hidden = new Float32Array(HIDDEN_SIZE)
-  output = new Float32Array(OUTPUT_SIZE)
-  zHidden = new Float32Array(HIDDEN_SIZE)
+  readonly arch: NnArchitecture
+  readonly inputSize: number
+  readonly hiddenSize: number
+
+  ih: Float32Array
+  ho: Float32Array
+  bh: Float32Array
+  bo: Float32Array
+  inputs: Float32Array
+  hidden: Float32Array
+  output: Float32Array
+  zHidden: Float32Array
   zOutput = 0
   lastLoss = 0
   lastTarget = 0
   lastDecisionCorrect = true
   weightDeltas = { distancia: 0, altura: 0, velocidade: 0 }
-  inputGradients = [0, 0, 0]
+  inputGradients: number[] = []
   learningRate = 0.15
 
-  constructor() {
+  constructor(arch: NnArchitecture = defaultArchitecture()) {
+    this.arch = { ...arch, hiddenSize: arch.hiddenSize }
+    this.inputSize = inputSizeFor(arch.inputMode)
+    this.hiddenSize = arch.hiddenSize
+    this.ih = new Float32Array(this.inputSize * this.hiddenSize)
+    this.ho = new Float32Array(this.hiddenSize * OUTPUT_SIZE)
+    this.bh = new Float32Array(this.hiddenSize)
+    this.bo = new Float32Array(OUTPUT_SIZE)
+    this.inputs = new Float32Array(this.inputSize)
+    this.hidden = new Float32Array(this.hiddenSize)
+    this.output = new Float32Array(OUTPUT_SIZE)
+    this.zHidden = new Float32Array(this.hiddenSize)
+    this.inputGradients = new Array(this.inputSize).fill(0)
     this.randomize()
   }
 
@@ -68,7 +90,7 @@ export class NeuralNetwork {
   }
 
   clone(): NeuralNetwork {
-    const n = new NeuralNetwork()
+    const n = new NeuralNetwork(this.arch)
     n.ih.set(this.ih)
     n.ho.set(this.ho)
     n.bh.set(this.bh)
@@ -77,6 +99,12 @@ export class NeuralNetwork {
   }
 
   copyFrom(other: NeuralNetwork) {
+    if (
+      other.inputSize !== this.inputSize ||
+      other.hiddenSize !== this.hiddenSize
+    ) {
+      return
+    }
     this.ih.set(other.ih)
     this.ho.set(other.ho)
     this.bh.set(other.bh)
@@ -93,10 +121,12 @@ export class NeuralNetwork {
   }
 
   loadSnapshot(s: NetworkSnapshot) {
+    if (s.ih.length !== this.ih.length) return false
     this.ih.set(s.ih)
     this.ho.set(s.ho)
     this.bh.set(s.bh)
     this.bo.set(s.bo)
+    return true
   }
 
   mutate(rate = 0.1, strength = 0.3) {
@@ -113,23 +143,29 @@ export class NeuralNetwork {
     tweak(this.bo)
   }
 
+  setInputVector(values: readonly number[]) {
+    const n = Math.min(values.length, this.inputSize)
+    for (let i = 0; i < n; i++) this.inputs[i] = values[i]
+    for (let i = n; i < this.inputSize; i++) this.inputs[i] = 0
+  }
+
+  /** Compat: 3 sentidos básicos (preenche o resto com 0 se extended). */
   setInputs(distancia: number, altura: number, velocidade: number) {
-    this.inputs[0] = distancia
-    this.inputs[1] = altura
-    this.inputs[2] = velocidade
+    this.setInputVector([distancia, altura, velocidade])
   }
 
   forward() {
-    for (let j = 0; j < HIDDEN_SIZE; j++) {
+    const { inputSize, hiddenSize } = this
+    for (let j = 0; j < hiddenSize; j++) {
       let sum = this.bh[j]
-      for (let i = 0; i < INPUT_SIZE; i++) {
-        sum += this.inputs[i] * this.ih[i * HIDDEN_SIZE + j]
+      for (let i = 0; i < inputSize; i++) {
+        sum += this.inputs[i] * this.ih[i * hiddenSize + j]
       }
       this.zHidden[j] = sum
       this.hidden[j] = sigmoid(sum)
     }
     let sumOut = this.bo[0]
-    for (let j = 0; j < HIDDEN_SIZE; j++) {
+    for (let j = 0; j < hiddenSize; j++) {
       sumOut += this.hidden[j] * this.ho[j]
     }
     this.zOutput = sumOut
@@ -142,7 +178,7 @@ export class NeuralNetwork {
   }
 
   getAggregatedInputWeights() {
-    return aggregatedInputWeightsFromSnapshot(this.toSnapshot())
+    return aggregatedInputWeightsFromSnapshot(this.toSnapshot(), this.arch)
   }
 
   trainOnDeath(idealFlap: boolean) {
@@ -153,34 +189,34 @@ export class NeuralNetwork {
     const outputError = out - this.lastTarget
     const outputDelta = outputError * sigmoidDerivative(out)
 
-    const hiddenDeltas = new Float32Array(HIDDEN_SIZE)
-    for (let j = 0; j < HIDDEN_SIZE; j++) {
+    const hiddenDeltas = new Float32Array(this.hiddenSize)
+    for (let j = 0; j < this.hiddenSize; j++) {
       hiddenDeltas[j] =
         outputDelta * this.ho[j] * sigmoidDerivative(this.hidden[j])
     }
 
-    const inputGrads = [0, 0, 0]
-    for (let i = 0; i < INPUT_SIZE; i++) {
+    const inputGrads = new Array(this.inputSize).fill(0)
+    for (let i = 0; i < this.inputSize; i++) {
       let g = 0
-      for (let j = 0; j < HIDDEN_SIZE; j++) {
-        g += hiddenDeltas[j] * this.ih[i * HIDDEN_SIZE + j]
+      for (let j = 0; j < this.hiddenSize; j++) {
+        g += hiddenDeltas[j] * this.ih[i * this.hiddenSize + j]
       }
       inputGrads[i] = Math.abs(g)
     }
-    const sumG = inputGrads[0] + inputGrads[1] + inputGrads[2] || 1
+    const sumG = inputGrads.reduce((a, b) => a + b, 0) || 1
     this.inputGradients = inputGrads.map((g) => g / sumG)
 
     const aggBefore = this.getAggregatedInputWeights()
     const lr = this.learningRate
 
-    for (let j = 0; j < HIDDEN_SIZE; j++) {
+    for (let j = 0; j < this.hiddenSize; j++) {
       this.ho[j] -= lr * outputDelta * this.hidden[j]
     }
     this.bo[0] -= lr * outputDelta
 
-    for (let j = 0; j < HIDDEN_SIZE; j++) {
-      for (let i = 0; i < INPUT_SIZE; i++) {
-        const idx = i * HIDDEN_SIZE + j
+    for (let j = 0; j < this.hiddenSize; j++) {
+      for (let i = 0; i < this.inputSize; i++) {
+        const idx = i * this.hiddenSize + j
         this.ih[idx] -= lr * hiddenDeltas[j] * this.inputs[i]
       }
       this.bh[j] -= lr * hiddenDeltas[j]
@@ -225,11 +261,12 @@ export class NeuralNetwork {
   }
 
   getHiddenNeuronDetail(index: number) {
+    const labels = inputLabelsFor(this.arch.inputMode)
     const connections = []
-    for (let i = 0; i < INPUT_SIZE; i++) {
+    for (let i = 0; i < this.inputSize; i++) {
       connections.push({
-        input: INPUT_LABELS[i],
-        weight: this.ih[i * HIDDEN_SIZE + index],
+        input: labels[i] ?? `in${i}`,
+        weight: this.ih[i * this.hiddenSize + index],
         activation: this.inputs[i],
       })
     }

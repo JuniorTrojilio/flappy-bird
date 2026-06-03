@@ -2,7 +2,8 @@ import { useCallback, useRef, useState } from 'react'
 import { GameCanvas } from '@/components/GameCanvas'
 import { NeuralPanel } from '@/components/NeuralPanel'
 import { GAME_WIDTH } from '@/game/constants'
-import type { GameEngine, GameMode } from '@/game/game-engine'
+import type { GameEngine, GameMode, NnConfigState } from '@/game/game-engine'
+import { defaultArchitecture, clampEvalSeeds } from '@/lib/nn-config'
 import { clampPopulationSize } from '@/game/population-mode'
 import type { PanelState, PanelUiEvents } from '@/lib/panel-types'
 import { clearTrainingState } from '@/lib/training-storage'
@@ -27,6 +28,10 @@ export default function App() {
   const [paused, setPaused] = useState(false)
   const [gameMode, setGameMode] = useState<GameMode>('ai')
   const [populationSize, setPopulationSize] = useState(1)
+  const [nnConfig, setNnConfig] = useState<NnConfigState>(() => ({
+    architecture: defaultArchitecture(),
+    evalSeeds: clampEvalSeeds(5),
+  }))
   const frameRef = useRef(0)
   const speedRef = useRef(speed)
   speedRef.current = speed
@@ -90,6 +95,14 @@ export default function App() {
     [onUiEvent]
   )
 
+  const handleNnConfigApply = useCallback(
+    (config: NnConfigState) => {
+      const ok = engineRef.current?.applyNnConfig(config) ?? false
+      if (ok) setNnConfig(config)
+    },
+    []
+  )
+
   const handleClearTraining = useCallback(() => {
     if (
       !window.confirm(
@@ -109,6 +122,10 @@ export default function App() {
     setPanelState(null)
     setSlowSnapshot(null)
     frameRef.current = 0
+    setNnConfig({
+      architecture: defaultArchitecture(),
+      evalSeeds: clampEvalSeeds(5),
+    })
   }, [])
 
   return (
@@ -127,8 +144,15 @@ export default function App() {
           onUiEvent={onUiEvent}
           onEngineReady={(engine) => {
             engineRef.current = engine
+            setNnConfig(engine.getNnConfig())
           }}
-          onRestored={() => setPopulationSize(1)}
+          onRestored={(info) => {
+            setPopulationSize(1)
+            setNnConfig({
+              architecture: info.architecture,
+              evalSeeds: info.evalSeeds,
+            })
+          }}
         />
       </aside>
       <main className="min-w-0 flex-1 h-full">
@@ -147,6 +171,8 @@ export default function App() {
           onClearTraining={handleClearTraining}
           populationSize={populationSize}
           onPopulationChange={handlePopulationApply}
+          nnConfig={nnConfig}
+          onNnConfigApply={handleNnConfigApply}
           onPlayerRestart={() => engineRef.current?.playerFlap()}
         />
       </main>

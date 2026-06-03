@@ -1,5 +1,6 @@
 import { BIRD_H, BIRD_HALF_EXTENT, GAME_WIDTH, GROUND_Y } from '@/game/constants'
 import { BIRD_X } from '@/game/collision'
+import type { InputMode } from '@/lib/nn-config'
 import { clamp } from '@/lib/utils'
 
 const MIN_Y = BIRD_H / 2
@@ -25,16 +26,42 @@ export function getNextPipe(
   return pipes[0] ?? null
 }
 
+/** Segundo cano à frente (lookahead). */
+export function getSecondPipe(
+  pipes: readonly PipeLike[],
+  birdX = BIRD_X,
+  pipeW: number
+): PipeLike | null {
+  let seen = 0
+  for (const p of pipes) {
+    if (p.x + pipeW > birdX) {
+      seen++
+      if (seen === 2) return p
+    }
+  }
+  return null
+}
+
+function gapPosition(
+  birdY: number,
+  pipe: PipeLike,
+  cfg: PipeInputConfig
+): number {
+  const gapTop = pipe.y + cfg.h
+  return clamp((birdY - gapTop) / cfg.gap, 0, 1)
+}
+
 /**
- * Entradas da rede 3→4→1.
- * altura_passaro = posição dentro da abertura (0 = topo, 0.5 = centro, 1 = base).
+ * Entradas da rede (3 básicas ou 5 com segundo cano).
+ * altura = posição dentro da abertura (0 = topo, 1 = base).
  */
 export function computeNnInputs(
   birdY: number,
   speed: number,
   pipes: readonly PipeLike[],
   cfg: PipeInputConfig,
-  jumpForce = 4.6
+  jumpForce = 4.6,
+  inputMode: InputMode = 'basic'
 ) {
   const pipe = getNextPipe(pipes, BIRD_X, cfg.w)
   let distancia_cano = 1
@@ -42,17 +69,40 @@ export function computeNnInputs(
 
   if (pipe) {
     distancia_cano = clamp((pipe.x - BIRD_X) / GAME_WIDTH, 0, 1)
-    const gapTop = pipe.y + cfg.h
-    altura_passaro = clamp((birdY - gapTop) / cfg.gap, 0, 1)
+    altura_passaro = gapPosition(birdY, pipe, cfg)
   } else {
-    // Sem cano à frente: altura no céu (0 = topo, 1 = perto do chão) para a rede saber que está caindo
     const span = SKY_FLOOR_Y - MIN_Y
     altura_passaro = span > 0 ? clamp((birdY - MIN_Y) / span, 0, 1) : 0.5
   }
 
-  return {
+  const base = {
     distancia_cano,
     altura_passaro,
     velocidade: clamp(speed / jumpForce, -1, 1),
+  }
+
+  if (inputMode === 'basic') {
+    return { ...base, vector: [base.distancia_cano, base.altura_passaro, base.velocidade] }
+  }
+
+  const pipe2 = getSecondPipe(pipes, BIRD_X, cfg.w)
+  let distancia_segundo = 1
+  let altura_segundo = 0.5
+  if (pipe2) {
+    distancia_segundo = clamp((pipe2.x - BIRD_X) / GAME_WIDTH, 0, 1)
+    altura_segundo = gapPosition(birdY, pipe2, cfg)
+  }
+
+  return {
+    ...base,
+    distancia_segundo,
+    altura_segundo,
+    vector: [
+      base.distancia_cano,
+      base.altura_passaro,
+      base.velocidade,
+      distancia_segundo,
+      altura_segundo,
+    ],
   }
 }

@@ -1,48 +1,63 @@
 import { useMemo, type SVGProps } from 'react'
-import { HIDDEN_SIZE, INPUT_SIZE } from '@/lib/nn-architecture'
 import type { HiddenNeuronDetail, PanelState } from '@/lib/panel-types'
 import { cn } from '@/lib/utils'
 
 /** Ativação sigmoid: acima disso o nó é considerado “ligado”. */
 const ACTIVATION_ON = 0.55
 
-const LAYOUT = {
-  input: [
-    { x: 58, y: 30 },
-    { x: 58, y: 72 },
-    { x: 58, y: 114 },
-  ],
-  hidden: [
-    { x: 172, y: 22 },
-    { x: 172, y: 50 },
-    { x: 172, y: 78 },
-    { x: 172, y: 106 },
-  ],
-  output: [{ x: 292, y: 72 }],
-} as const
+function spreadY(count: number, top: number, bottom: number) {
+  if (count <= 1) return [(top + bottom) / 2]
+  const step = (bottom - top) / (count - 1)
+  return Array.from({ length: count }, (_, i) => top + step * i)
+}
 
-const INPUT_META = [
-  {
-    label: 'Cano',
-    hint: 'Quão longe está o próximo cano (0 = perto, 1 = longe)',
-  },
-  {
-    label: 'Abertura',
-    hint: 'Posição na fenda do cano (0 = topo, 1 = base)',
-  },
-  {
-    label: 'Queda',
-    hint: 'Velocidade vertical (caindo = valor alto)',
-  },
-] as const
+function buildDiagramLayout(inputCount: number, hiddenCount: number) {
+  const viewH = Math.max(132, 24 + Math.max(inputCount, hiddenCount) * 22)
+  const midY = viewH / 2
+  return {
+    viewH,
+    viewW: 340,
+    input: spreadY(inputCount, 22, viewH - 22).map((y) => ({ x: 58, y })),
+    hidden: spreadY(hiddenCount, 16, viewH - 16).map((y) => ({ x: 172, y })),
+    output: [{ x: 292, y: midY }],
+  }
+}
+
+function inputMetaFor(inputCount: number) {
+  const meta = [
+    {
+      label: 'Cano',
+      hint: 'Quão longe está o próximo cano (0 = perto, 1 = longe)',
+    },
+    {
+      label: 'Abertura',
+      hint: 'Posição na fenda do cano (0 = topo, 1 = base)',
+    },
+    {
+      label: 'Queda',
+      hint: 'Velocidade vertical (caindo = valor alto)',
+    },
+    {
+      label: 'Cano+1',
+      hint: 'Distância ao segundo cano à frente',
+    },
+    {
+      label: 'Fenda+1',
+      hint: 'Posição na fenda do segundo cano',
+    },
+  ]
+  return meta.slice(0, inputCount)
+}
 
 const HIDDEN_HINT =
-  'Combina os 3 sentidos; clique para ver o que está pesando agora'
+  'Combina os sentidos de entrada; clique para ver o que está pesando agora'
 
 const INPUT_KEY_LABEL: Record<string, string> = {
   distancia: 'Cano',
   altura: 'Abertura',
   velocidade: 'Queda',
+  distancia2: 'Cano+1',
+  altura2: 'Fenda+1',
 }
 
 function activationColor(v: number) {
@@ -94,7 +109,14 @@ export function NetworkDiagram({
   backpropActive,
   compact,
 }: NetworkDiagramProps) {
-  const { diagram, weights, hiddenDetail, calculo, inputs } = state
+  const { diagram, weights, hiddenDetail, calculo, inputs, arquitetura } = state
+  const inputCount = arquitetura.inputSize
+  const hiddenCount = arquitetura.hiddenSize
+  const layout = useMemo(
+    () => buildDiagramLayout(inputCount, hiddenCount),
+    [inputCount, hiddenCount]
+  )
+  const inputMeta = useMemo(() => inputMetaFor(inputCount), [inputCount])
 
   const connections = useMemo(() => {
     const lines: {
@@ -107,34 +129,34 @@ export function NetworkDiagram({
       inputIdx: number
       hiddenIdx: number
     }[] = []
-    for (let i = 0; i < INPUT_SIZE; i++) {
-      for (let j = 0; j < HIDDEN_SIZE; j++) {
+    for (let i = 0; i < inputCount; i++) {
+      for (let j = 0; j < hiddenCount; j++) {
         lines.push({
-          x1: LAYOUT.input[i].x,
-          y1: LAYOUT.input[i].y,
-          x2: LAYOUT.hidden[j].x,
-          y2: LAYOUT.hidden[j].y,
-          w: weights.ih[i * HIDDEN_SIZE + j],
+          x1: layout.input[i]!.x,
+          y1: layout.input[i]!.y,
+          x2: layout.hidden[j]!.x,
+          y2: layout.hidden[j]!.y,
+          w: weights.ih[i * hiddenCount + j] ?? 0,
           fromInput: true,
           inputIdx: i,
           hiddenIdx: j,
         })
       }
     }
-    for (let j = 0; j < HIDDEN_SIZE; j++) {
+    for (let j = 0; j < hiddenCount; j++) {
       lines.push({
-        x1: LAYOUT.hidden[j].x,
-        y1: LAYOUT.hidden[j].y,
-        x2: LAYOUT.output[0].x,
-        y2: LAYOUT.output[0].y,
-        w: weights.ho[j],
+        x1: layout.hidden[j]!.x,
+        y1: layout.hidden[j]!.y,
+        x2: layout.output[0]!.x,
+        y2: layout.output[0]!.y,
+        w: weights.ho[j] ?? 0,
         fromInput: false,
         inputIdx: -1,
         hiddenIdx: j,
       })
     }
     return lines
-  }, [weights])
+  }, [weights, layout, inputCount, hiddenCount])
 
   const topInput = indexOfMax(diagram.inputs, 0.35)
   const topHidden = indexOfMax(diagram.hidden)
@@ -178,7 +200,7 @@ export function NetworkDiagram({
       )}
 
       <svg
-        viewBox="0 0 340 132"
+        viewBox={`0 0 ${layout.viewW} ${layout.viewH}`}
         className={cn(
           'w-full max-w-full',
           compact ? 'min-h-0 flex-1' : 'h-auto',
@@ -208,11 +230,11 @@ export function NetworkDiagram({
         {diagram.inputs.map((v, i) => (
           <InputNeuron
             key={`in-${i}`}
-            x={LAYOUT.input[i].x}
-            y={LAYOUT.input[i].y}
+            x={layout.input[i]!.x}
+            y={layout.input[i]!.y}
             v={v}
-            label={INPUT_META[i].label}
-            hint={INPUT_META[i].hint}
+            label={inputMeta[i]?.label ?? `In${i + 1}`}
+            hint={inputMeta[i]?.hint ?? ''}
             live={formatInputLive(i, inputs)}
             active={isNodeOn(v)}
             primary={topInput === i}
@@ -223,8 +245,8 @@ export function NetworkDiagram({
         {diagram.hidden.map((v, i) => (
           <HiddenNeuron
             key={`h-${i}`}
-            x={LAYOUT.hidden[i].x}
-            y={LAYOUT.hidden[i].y}
+            x={layout.hidden[i]!.x}
+            y={layout.hidden[i]!.y}
             index={i}
             v={v}
             active={isNodeOn(v)}
@@ -237,8 +259,8 @@ export function NetworkDiagram({
         ))}
 
         <OutputNeuron
-          x={LAYOUT.output[0].x}
-          y={LAYOUT.output[0].y}
+          x={layout.output[0]!.x}
+          y={layout.output[0]!.y}
           v={diagram.output[0]}
           active={outputOn}
           wantsFlap={wantsFlap}
@@ -258,8 +280,7 @@ export function NetworkDiagram({
         />
       ) : (
         <p className="shrink-0 text-[9px] leading-snug text-muted-foreground">
-          Toque num círculo da camada oculta para ver como ele mistura Cano,
-          Abertura e Queda.
+          Toque num neurônio oculto para ver como ele combina as entradas.
         </p>
       )}
     </div>

@@ -13,7 +13,12 @@ import {
   type BirdSpriteVariant,
   birdSpriteFrame,
 } from '@/game/bird-sprites'
-import { HIDDEN_SIZE } from '@/lib/nn-architecture'
+import {
+  architectureLabel,
+  defaultArchitecture,
+  type EvalSeedOption,
+  type NnArchitecture,
+} from '@/lib/nn-config'
 import {
   aggregatedInputWeightsFromSnapshot,
   NeuralNetwork,
@@ -46,6 +51,13 @@ export type RestoredTrainingInfo = {
   generation: number
   recorde: number
   historicoLength: number
+  architecture: NnArchitecture
+  evalSeeds: EvalSeedOption
+}
+
+export type NnConfigState = {
+  architecture: NnArchitecture
+  evalSeeds: EvalSeedOption
 }
 
 export type GameEngineCallbacks = {
@@ -60,8 +72,14 @@ export { POPULATION_MAX, POPULATION_MIN, clampPopulationSize }
 
 export class GameEngine {
   private ctx: CanvasRenderingContext2D
-  private displayNn = new NeuralNetwork()
+  private displayNn: NeuralNetwork
   private population: PopulationMode
+  private lastGeneralizacao: {
+    evalSeeds: number
+    melhorVisual: number
+    melhorFitness: number
+    mediaFitness: number
+  } | null = null
   private world: WorldState = { pipes: [], spawnTimer: 0, fgX: 0, frame: 0 }
 
   private frames = 0
@@ -113,7 +131,8 @@ export class GameEngine {
   constructor(canvas: HTMLCanvasElement, callbacks: GameEngineCallbacks) {
     this.ctx = canvas.getContext('2d')!
     this.callbacks = callbacks
-    this.population = new PopulationMode(1)
+    this.population = new PopulationMode(1, defaultArchitecture())
+    this.displayNn = new NeuralNetwork(this.population.getArchitecture())
     this.sprite.src = '/img/sprite.png'
     this.sprite.onload = () => this.boot()
     if (this.sprite.complete) this.boot()
@@ -251,6 +270,7 @@ export class GameEngine {
     this.ultraRedrawPending = true
     this.hallOfFameScore = 0
     this.hallOfFameSnapshot = null
+    this.lastGeneralizacao = null
     this.population.setGeneration(1)
     this.population.clearLineage()
     this.population.resize(1, { preserveChampion: false })
@@ -300,7 +320,73 @@ export class GameEngine {
       networks: this.population.exportSnapshots(),
       hallOfFame: this.hallOfFameScore,
       hallOfFameSnapshot: this.hallOfFameSnapshot,
+      inputMode: this.population.getArchitecture().inputMode,
+      hiddenSize: this.population.getArchitecture().hiddenSize,
+      evalSeeds: this.population.getEvalSeedCount(),
     })
+  }
+
+  getNnConfig(): NnConfigState {
+    return {
+      architecture: { ...this.population.getArchitecture() },
+      evalSeeds: this.population.getEvalSeedCount(),
+    }
+  }
+
+  /**
+   * Troca tamanho da rede / entradas / seeds de avaliação.
+   * Reinicia aprendizado salvo se a arquitetura mudar (incompatível com snapshots).
+   */
+  applyNnConfig(config: NnConfigState, opts?: { skipConfirm?: boolean }): boolean {
+    const cur = this.getNnConfig()
+    const archChanged =
+      cur.architecture.inputMode !== config.architecture.inputMode ||
+      cur.architecture.hiddenSize !== config.architecture.hiddenSize
+
+    if (archChanged) {
+      const hasProgress =
+        this.persistTrainingEnabled &&
+        (this.training.historico.length > 0 || this.hallOfFameScore > 0)
+      if (
+        hasProgress &&
+        !opts?.skipConfirm &&
+        !window.confirm(
+          'Mudar neurônios ou entradas reinicia o treino (pesos incompatíveis). Continuar?'
+        )
+      ) {
+        return false
+      }
+      this.persistTrainingEnabled = false
+      clearTrainingState()
+      this.training = {
+        recorde: 0,
+        historico: [],
+        pesoMudou: false,
+        lastAvg: 0,
+        lastBest: 0,
+        vivos: 0,
+      }
+      this.hallOfFameScore = 0
+      this.hallOfFameSnapshot = null
+      this.lastGeneralizacao = null
+      this.population.setGeneration(1)
+      this.population.clearLineage()
+    }
+
+    this.population.setArchitecture(config.architecture)
+    this.population.setEvalSeedCount(config.evalSeeds)
+    this.displayNn = new NeuralNetwork(config.architecture)
+    if (archChanged) {
+      this.population.resize(this.population.size, { preserveChampion: false })
+      this.startFreshRun()
+    }
+    this.syncDisplayFromChampion()
+    this.persistTrainingEnabled = true
+    this.callbacks.onUiEvent({
+      genScoreMsg: `Rede ${architectureLabel(config.architecture)} · ${config.evalSeeds} mapa(s)/pássaro`,
+    })
+    setTimeout(() => this.callbacks.onUiEvent({ genScoreMsg: null }), 2200)
+    return true
   }
 
   private tryRestoreFromStorage() {
@@ -314,6 +400,14 @@ export class GameEngine {
       this.world = this.population.createWorld()
       return
     }
+
+    const arch = {
+      inputMode: saved.inputMode,
+      hiddenSize: saved.hiddenSize,
+    }
+    this.population.setArchitecture(arch)
+    this.population.setEvalSeedCount(saved.evalSeeds)
+    this.displayNn = new NeuralNetwork(arch)
 
     const ok = this.population.importFromSnapshots(
       saved.populationSize,
@@ -346,6 +440,8 @@ export class GameEngine {
       generation: saved.generation,
       recorde: saved.recorde,
       historicoLength: saved.historico.length,
+      architecture: arch,
+      evalSeeds: saved.evalSeeds,
     })
 
     this.callbacks.onUiEvent({
@@ -366,11 +462,14 @@ export class GameEngine {
   }
 
   private inputsFromState(y: number, speed: number) {
-    return computeNnInputs(y, speed, this.world.pipes, {
-      w: 53,
-      h: 400,
-      gap: 85,
-    })
+    return computeNnInputs(
+      y,
+      speed,
+      this.world.pipes,
+      { w: 53, h: 400, gap: 85 },
+      undefined,
+      this.population.getArchitecture().inputMode
+    )
   }
 
   private buildChartSeries(): number[] {
@@ -442,12 +541,13 @@ export class GameEngine {
   private buildPanelState(): PanelState {
     const idx = this.population.championIndex
     const inp = this.inputsFromState(this.population.y[idx], this.population.speed[idx])
-    this.displayNn.setInputs(inp.distancia_cano, inp.altura_passaro, inp.velocidade)
+    this.displayNn.setInputVector(inp.vector)
     this.displayNn.forward()
     const calculo = this.displayNn.getPanelCalculo()
+    const arch = this.population.getArchitecture()
 
     const hiddenDetail = []
-    for (let i = 0; i < HIDDEN_SIZE; i++) {
+    for (let i = 0; i < arch.hiddenSize; i++) {
       hiddenDetail.push(this.displayNn.getHiddenNeuronDetail(i))
     }
 
@@ -455,12 +555,23 @@ export class GameEngine {
       this.hallOfFameScore > 0 && this.hallOfFameSnapshot
         ? {
             score: this.hallOfFameScore,
-            pesos: aggregatedInputWeightsFromSnapshot(this.hallOfFameSnapshot),
+            pesos: aggregatedInputWeightsFromSnapshot(
+              this.hallOfFameSnapshot,
+              arch
+            ),
           }
         : null
 
     return {
       inputs: inp,
+      arquitetura: {
+        label: architectureLabel(arch),
+        inputMode: arch.inputMode,
+        inputSize: this.displayNn.inputSize,
+        hiddenSize: arch.hiddenSize,
+        evalSeeds: this.population.getEvalSeedCount(),
+      },
+      generalizacao: this.lastGeneralizacao,
       pesos: this.displayNn.getAggregatedInputWeights(),
       campeaoHistorico,
       calculo,
@@ -565,7 +676,7 @@ export class GameEngine {
     const snap = this.hallOfFameSnapshot
     if (!snap || this.population.size === 0) return
 
-    const champ = new NeuralNetwork()
+    const champ = new NeuralNetwork(this.population.getArchitecture())
     champ.loadSnapshot(snap)
     if (
       this.population.size === 1 &&
@@ -599,10 +710,12 @@ export class GameEngine {
       return
     }
 
+    const hallScore =
+      result.evalSeeds > 1 ? result.fitnessBest : result.bestScore
     if (result.generationBestSnapshot) {
-      this.updateHallOfFame(result.bestScore, result.generationBestSnapshot)
+      this.updateHallOfFame(hallScore, result.generationBestSnapshot)
     }
-    this.installHallOfFameChampion(result.bestScore)
+    this.installHallOfFameChampion(hallScore)
 
     this.simAccumulator = 0
     // Mundo novo + pássaros no início (evita renascer dentro de cano antigo)
@@ -610,21 +723,33 @@ export class GameEngine {
     this.generationEnding = false
     this.ultraRedrawPending = true
 
-    this.training.lastBest = result.bestScore
-    this.training.lastAvg = result.avgScore
-    this.training.historico.push(result.bestScore)
+    const chartScore =
+      result.evalSeeds > 1 ? result.fitnessBest : result.bestScore
+    this.training.lastBest = chartScore
+    this.training.lastAvg = result.fitnessAvg
+    this.training.historico.push(chartScore)
+    this.lastGeneralizacao = {
+      evalSeeds: result.evalSeeds,
+      melhorVisual: result.bestScore,
+      melhorFitness: result.fitnessBest,
+      mediaFitness: result.fitnessAvg,
+    }
 
-    if (result.bestScore > this.training.recorde) {
-      this.training.recorde = result.bestScore
+    if (chartScore > this.training.recorde) {
+      this.training.recorde = chartScore
       this.callbacks.onUiEvent({
         flashRecord: Date.now(),
-        recordBanner: `🏆 NOVO RECORDE: ${result.bestScore}`,
+        recordBanner: `🏆 NOVO RECORDE: ${chartScore}`,
       })
       setTimeout(() => this.callbacks.onUiEvent({ recordBanner: null }), 2000)
     }
 
+    const genMsg =
+      result.evalSeeds > 1
+        ? `G${result.generation - 1}: fitness ${result.fitnessBest.toFixed(1)} (${result.evalSeeds} mapas) · visual ${result.bestScore}`
+        : `G${result.generation - 1}: melhor ${result.bestScore} · média ${result.avgScore.toFixed(1)}`
     this.callbacks.onUiEvent({
-      genScoreMsg: `G${result.generation - 1}: melhor ${result.bestScore} · média ${result.avgScore.toFixed(1)} (${this.population.size} pássaros)`,
+      genScoreMsg: `${genMsg} (${this.population.size} pássaros)`,
     })
     setTimeout(() => this.callbacks.onUiEvent({ genScoreMsg: null }), 1200)
 

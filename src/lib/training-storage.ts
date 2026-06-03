@@ -1,10 +1,17 @@
-import { HIDDEN_SIZE, INPUT_SIZE, OUTPUT_SIZE } from '@/lib/nn-architecture'
+import {
+  defaultArchitecture,
+  inputSizeFor,
+  OUTPUT_SIZE,
+  snapshotMatchesArchitecture,
+  type EvalSeedOption,
+  type InputMode,
+  type NnArchitecture,
+} from '@/lib/nn-config'
 import type { NetworkSnapshot } from '@/lib/neural-network'
 
 const STORAGE_KEY = 'flappy-bird-nn-training'
-/** Recorde do index.html legado (modo jogador manual). */
 const LEGACY_BEST_KEY = 'best'
-const SAVE_VERSION = 2
+const SAVE_VERSION = 3
 const MAX_HISTORICO = 400
 
 export type TrainingSaveData = {
@@ -21,9 +28,21 @@ export type TrainingSaveData = {
   networks: NetworkSnapshot[]
   hallOfFame?: number
   hallOfFameSnapshot?: NetworkSnapshot | null
+  inputMode: InputMode
+  hiddenSize: number
+  evalSeeds: EvalSeedOption
 }
 
-export function saveTrainingState(data: Omit<TrainingSaveData, 'version' | 'savedAt'>): boolean {
+export function architectureFromSave(data: TrainingSaveData): NnArchitecture {
+  return {
+    inputMode: data.inputMode ?? 'basic',
+    hiddenSize: data.hiddenSize ?? 4,
+  }
+}
+
+export function saveTrainingState(
+  data: Omit<TrainingSaveData, 'version' | 'savedAt'>
+): boolean {
   try {
     const payload: TrainingSaveData = {
       ...data,
@@ -46,6 +65,9 @@ export function loadTrainingState(): TrainingSaveData | null {
     if (data.version !== SAVE_VERSION) return null
     if (!Array.isArray(data.networks) || data.networks.length === 0) return null
     if (data.networks.length !== data.populationSize) return null
+
+    const arch = architectureFromSave(data)
+
     for (const net of data.networks) {
       if (
         !Array.isArray(net.ih) ||
@@ -55,18 +77,22 @@ export function loadTrainingState(): TrainingSaveData | null {
       ) {
         return null
       }
-      if (
-        net.ih.length !== INPUT_SIZE * HIDDEN_SIZE ||
-        net.ho.length !== HIDDEN_SIZE * OUTPUT_SIZE ||
-        net.bh.length !== HIDDEN_SIZE ||
-        net.bo.length !== OUTPUT_SIZE
-      ) {
-        return null
+      if (!snapshotMatchesArchitecture(net, arch)) return null
+    }
+
+    if (data.hallOfFameSnapshot) {
+      if (!snapshotMatchesArchitecture(data.hallOfFameSnapshot, arch)) {
+        data.hallOfFameSnapshot = null
+        data.hallOfFame = 0
       }
     }
+
     return {
       ...data,
       historico: Array.isArray(data.historico) ? data.historico : [],
+      inputMode: arch.inputMode,
+      hiddenSize: arch.hiddenSize,
+      evalSeeds: data.evalSeeds ?? 5,
     }
   } catch {
     return null
@@ -90,4 +116,19 @@ export function clearTrainingState() {
 
 export function hasSavedTraining() {
   return loadTrainingState() !== null
+}
+
+export function defaultSaveArchitecture(): NnArchitecture {
+  return defaultArchitecture()
+}
+
+export function expectedSnapshotSizes(arch: NnArchitecture) {
+  const inSize = inputSizeFor(arch.inputMode)
+  const h = arch.hiddenSize
+  return {
+    ih: inSize * h,
+    ho: h * OUTPUT_SIZE,
+    bh: h,
+    bo: OUTPUT_SIZE,
+  }
 }

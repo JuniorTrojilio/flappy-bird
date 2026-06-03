@@ -8,7 +8,14 @@ import {
   birdHitsPipeAlongPath,
   type PipeCollisionConfig,
 } from '@/game/collision'
+import { averageFitnessAcrossSeeds } from '@/game/fitness-eval'
 import { computeNnInputs } from '@/game/nn-inputs'
+import {
+  clampEvalSeeds,
+  defaultArchitecture,
+  type EvalSeedOption,
+  type NnArchitecture,
+} from '@/lib/nn-config'
 import { evolvePopulation } from '@/lib/population-evolution'
 import type { NetworkSnapshot } from '@/lib/neural-network'
 import { NeuralNetwork } from '@/lib/neural-network'
@@ -49,12 +56,18 @@ export type ChampionContinueState = {
 }
 
 export type GenerationEndResult = {
+  /** Melhor pontuação da partida visível (uma seed). */
   bestScore: number
   avgScore: number
   bestIndex: number
   generation: number
   /** Rede do melhor pássaro desta geração (antes da mutação). */
   generationBestSnapshot: NetworkSnapshot | null
+  /** Fitness usado na evolução (média em N seeds, se N>1). */
+  fitnessBest: number
+  fitnessAvg: number
+  fitnessScores: number[]
+  evalSeeds: number
 }
 
 export const POPULATION_MIN = 1
@@ -78,9 +91,57 @@ export class PopulationMode {
   /** Melhores redes da geração (ordem: campeão → demais), capturadas antes da evolução */
   private rankedSnapshots: NetworkSnapshot[] = []
   private pipeConfig = { w: 53, h: 400, gap: 85, maxYPos: -150, dx: 2 }
+  arch: NnArchitecture = defaultArchitecture()
+  /** Partidas por pássaro ao fechar a geração (1 = só a rodada visível). */
+  evalSeedCount: EvalSeedOption = 5
 
-  constructor(size: number) {
+  constructor(size: number, arch?: NnArchitecture) {
+    if (arch) this.arch = arch
     this.resize(size)
+  }
+
+  getArchitecture() {
+    return this.arch
+  }
+
+  setArchitecture(arch: NnArchitecture) {
+    this.arch = arch
+    this.rankedSnapshots = []
+    this.resize(this.size)
+  }
+
+  setEvalSeedCount(count: number) {
+    this.evalSeedCount = clampEvalSeeds(count)
+  }
+
+  getEvalSeedCount() {
+    return this.evalSeedCount
+  }
+
+  private newNetwork() {
+    return new NeuralNetwork(this.arch)
+  }
+
+  private fitnessSimConfig() {
+    return {
+      pipe: this.pipeConfig,
+      inputMode: this.arch.inputMode,
+      jumpForce: JUMP,
+    } as const
+  }
+
+  private computeFitnessScores(): number[] {
+    const base = (this.generation * 10007) >>> 0
+    return this.networks.map((net, i) =>
+      Math.round(
+        averageFitnessAcrossSeeds(
+          net,
+          this.evalSeedCount,
+          (base + i * 997) >>> 0,
+          this.fitnessSimConfig()
+        ) * 10
+      ) / 10
+    )
   }
 
   /** Atualiza elites se a geração atual já pontuou (redes ainda batem com score[]). */
@@ -115,7 +176,7 @@ export class PopulationMode {
     if (this.rankedSnapshots.length > 0) {
       const keep = Math.min(newSize, this.rankedSnapshots.length)
       for (let i = 0; i < keep; i++) {
-        const net = new NeuralNetwork()
+        const net = this.newNetwork()
         net.loadSnapshot(this.rankedSnapshots[i]!)
         next.push(net)
       }
@@ -124,7 +185,7 @@ export class PopulationMode {
     }
 
     if (next.length === 0) {
-      return Array.from({ length: newSize }, () => new NeuralNetwork())
+      return Array.from({ length: newSize }, () => this.newNetwork())
     }
 
     const seed = next[0]!
@@ -161,7 +222,7 @@ export class PopulationMode {
 
     if (!preserve || oldSize === 0) {
       this.size = newSize
-      this.networks = Array.from({ length: newSize }, () => new NeuralNetwork())
+      this.networks = Array.from({ length: newSize }, () => this.newNetwork())
       this.championIndex = 0
       this.rankedSnapshots = []
       return
@@ -234,7 +295,14 @@ export class PopulationMode {
   }
 
   private inputsFor(y: number, speed: number, world: WorldState) {
-    return computeNnInputs(y, speed, world.pipes, this.pipeConfig, JUMP)
+    return computeNnInputs(
+      y,
+      speed,
+      world.pipes,
+      this.pipeConfig,
+      JUMP,
+      this.arch.inputMode
+    )
   }
 
   private pickChampion() {
@@ -299,7 +367,7 @@ export class PopulationMode {
 
       const inp = this.inputsFor(this.y[i], this.speed[i], world)
       const nn = this.networks[i]
-      nn.setInputs(inp.distancia_cano, inp.altura_passaro, inp.velocidade)
+      nn.setInputVector(inp.vector)
       nn.forward()
 
       const shouldFlap = opts?.playerControl
@@ -349,28 +417,42 @@ export class PopulationMode {
   }
 
   endGeneration(previousBest = 0): GenerationEndResult {
-    const scores = Array.from(this.score)
-    // Antes de evoluir: índices de score[] ainda batem com networks[]
-    this.captureRankedSnapshots(scores)
-    const evolved = evolvePopulation(this.networks, scores, { previousBest })
+    const visualScores = Array.from(this.score)
+    const fitnessScores =
+      this.evalSeedCount > 1
+        ? this.computeFitnessScores()
+        : visualScores.map((s) => s)
+    // Antes de evoluir: ranking pelo fitness (generalização)
+    this.captureRankedSnapshots(fitnessScores)
+    const evolved = evolvePopulation(this.networks, fitnessScores, {
+      previousBest,
+    })
     this.networks = evolved.population
     this.generation++
     this.championIndex = 0
     // Com vários pássaros, garante networks[0] = melhor pré-evolução (filhos podem ter sido reordenados)
     if (this.size > 1 && this.rankedSnapshots[0]) {
-      const champ = new NeuralNetwork()
+      const champ = this.newNetwork()
       champ.loadSnapshot(this.rankedSnapshots[0])
       this.networks[0] = champ
     } else if (this.networks[0]) {
       // 1 pássaro: mantém rede já mutada e atualiza snapshot para resize
       this.rankedSnapshots = [this.networks[0].toSnapshot()]
     }
+    const fitnessBest = Math.max(0, ...fitnessScores)
+    const fitnessAvg =
+      fitnessScores.reduce((a, b) => a + b, 0) / Math.max(fitnessScores.length, 1)
+
     return {
-      bestScore: evolved.bestScore,
+      bestScore: Math.max(0, ...visualScores),
       avgScore: evolved.avgScore,
       bestIndex: evolved.bestIndex,
       generation: this.generation,
       generationBestSnapshot: this.rankedSnapshots[0] ?? null,
+      fitnessBest,
+      fitnessAvg,
+      fitnessScores,
+      evalSeeds: this.evalSeedCount,
     }
   }
 
@@ -402,7 +484,7 @@ export class PopulationMode {
     if (snapshots.length !== size) return false
     this.size = size
     this.networks = snapshots.map((s) => {
-      const net = new NeuralNetwork()
+      const net = this.newNetwork()
       net.loadSnapshot(s)
       return net
     })
