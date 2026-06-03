@@ -1,4 +1,9 @@
+/**
+ * Algoritmo genético: mantém elites, cria filhos mutando pesos e injeta redes novas (imigrantes).
+ * Guia: docs/GUIA-DO-CODIGO.md
+ */
 import { NeuralNetwork } from '@/lib/neural-network'
+import { roundScore } from '@/lib/score'
 
 export type EvolveOptions = {
   /** Melhor pontuação da geração anterior (refino com 1 pássaro) */
@@ -42,7 +47,9 @@ export function evolvePopulation(
     .sort((a, b) => b.score - a.score)
 
   const bestScore = ranked[0]?.score ?? 0
-  const avgScore = scores.reduce((a, b) => a + b, 0) / Math.max(n, 1)
+  const avgScore = roundScore(
+    scores.reduce((a, b) => a + b, 0) / Math.max(n, 1)
+  )
 
   // n=1: um único clone (evita ranked[1] indefinido que quebrava o loop do jogo)
   const eliteCount =

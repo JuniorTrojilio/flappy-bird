@@ -1,3 +1,8 @@
+/**
+ * Rede neural pequena (entradas → oculta → 1 saída). O pássaro “pensa” aqui a cada frame.
+ * Saída > 0,5 = bater asa. Pesos mudam pela evolução genética, não por backprop de escola.
+ * Guia: docs/GUIA-DO-CODIGO.md
+ */
 import {
   defaultArchitecture,
   inputLabelsFor,

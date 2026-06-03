@@ -2,6 +2,9 @@ export interface PanelInputs {
   distancia_cano: number
   altura_passaro: number
   velocidade: number
+  /** Modo completo (5 entradas): segundo cano à frente */
+  distancia_segundo?: number
+  altura_segundo?: number
 }
 
 export interface PanelPesos {

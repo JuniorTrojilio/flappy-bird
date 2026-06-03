@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { Badge } from '@/components/ui/badge'
 import type { PanelCalculo, PanelEvolucao } from '@/lib/panel-types'
+import { formatScore } from '@/lib/score'
 import { cn } from '@/lib/utils'
 
 type EvolutionSectionProps = {
@@ -46,7 +47,7 @@ export function EvolutionSection({
       <StatRow label="Geração" value={String(evolucao.geracao)} />
       <StatRow
         label="Melhor (rodada)"
-        value={String(evolucao.melhorRodada)}
+        value={formatScore(evolucao.melhorRodada)}
         hint={
           evolucao.melhorUltimaGeracao > 0 ? (
             <span className={deltaTone}>
@@ -57,13 +58,13 @@ export function EvolutionSection({
       />
       <StatRow
         label="Média (vivos)"
-        value={evolucao.mediaRodada.toFixed(1)}
+        value={formatScore(evolucao.mediaRodada)}
       />
       <StatRow
         label="Última geração"
-        value={`${evolucao.melhorUltimaGeracao} canos`}
+        value={`${formatScore(evolucao.melhorUltimaGeracao)} canos`}
       />
-      <StatRow label="Recorde" value={String(evolucao.recorde)} highlight />
+      <StatRow label="Recorde" value={formatScore(evolucao.recorde)} highlight />
 
       <div className="border-t border-border/60 pt-1.5">
         <p className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">

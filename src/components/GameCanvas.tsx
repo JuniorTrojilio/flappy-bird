@@ -1,3 +1,7 @@
+/**
+ * Elemento <canvas> na tela: cria o GameEngine e liga velocidade/pausa/modo jogador.
+ * Guia: docs/GUIA-DO-CODIGO.md
+ */
 import { useEffect, useRef } from 'react'
 import { PanelToasts } from '@/components/panel/PanelToasts'
 import { GAME_HEIGHT, GAME_WIDTH } from '@/game/constants'
@@ -7,7 +11,6 @@ import type { PanelState, PanelUiEvents } from '@/lib/panel-types'
 
 type GameCanvasProps = {
   speed: number
-  ultraTurbo: boolean
   paused: boolean
   gameMode: GameMode
   ui: PanelUiEvents
@@ -19,7 +22,6 @@ type GameCanvasProps = {
 
 export function GameCanvas({
   speed,
-  ultraTurbo,
   paused,
   gameMode,
   ui,
@@ -32,13 +34,11 @@ export function GameCanvas({
   const engineRef = useRef<GameEngine | null>(null)
 
   const speedRef = useRef(speed)
-  const ultraTurboRef = useRef(ultraTurbo)
   const gameModeRef = useRef(gameMode)
   const onStateRef = useRef(onState)
   const onUiEventRef = useRef(onUiEvent)
   const onRestoredRef = useRef(onRestored)
   speedRef.current = speed
-  ultraTurboRef.current = ultraTurbo
   gameModeRef.current = gameMode
   onStateRef.current = onState
   onUiEventRef.current = onUiEvent
@@ -65,10 +65,6 @@ export function GameCanvas({
   useEffect(() => {
     engineRef.current?.setSpeed(speed)
   }, [speed])
-
-  useEffect(() => {
-    engineRef.current?.setUltraTurbo(ultraTurbo)
-  }, [ultraTurbo])
 
   useEffect(() => {
     engineRef.current?.setPaused(paused)

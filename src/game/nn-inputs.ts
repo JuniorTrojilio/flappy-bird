@@ -1,3 +1,8 @@
+/**
+ * O que a IA “enxerga” a cada frame: distância ao cano, altura na fenda, velocidade (+ 2 extras no modo extended).
+ * Valores entre 0 e 1 para a rede processar.
+ * Guia: docs/GUIA-DO-CODIGO.md
+ */
 import { BIRD_H, BIRD_HALF_EXTENT, GAME_WIDTH, GROUND_Y } from '@/game/constants'
 import { BIRD_X } from '@/game/collision'
 import type { InputMode } from '@/lib/nn-config'

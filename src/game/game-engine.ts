@@ -1,3 +1,8 @@
+/**
+ * Motor do jogo: loop de frames, desenho no canvas, turbo (×1–×10), treino com população.
+ * No fim de cada geração avalia fitness, evolui redes e salva no localStorage.
+ * Guia: docs/GUIA-DO-CODIGO.md
+ */
 import { GAME_HEIGHT, GAME_WIDTH } from '@/game/constants'
 import {
   clampPopulationSize,
@@ -27,7 +32,9 @@ import {
 import type { PanelState, PanelUiEvents } from '@/lib/panel-types'
 import {
   clearTrainingState,
+  loadNnPrefs,
   loadTrainingState,
+  saveNnPrefs,
   saveTrainingState,
 } from '@/lib/training-storage'
 import { computeNnInputs } from '@/game/nn-inputs'
@@ -39,13 +46,13 @@ import {
   isInsideStartBtn,
 } from '@/game/player-ui-sprites'
 import { getEvolutionLayout } from '@/lib/population-evolution'
+import { roundScore } from '@/lib/score'
 import type { PanelEvolucao } from '@/lib/panel-types'
 
 const DEGREE = Math.PI / 180
-/** Passos de simulação por frame no ultraturbo (sem desenho intermediário). */
-const ULTRA_BURST_STEPS = 24_000
+/** Turbo do treino: até ×10 passos de simulação por frame desenhado. */
+export const MAX_GAME_SPEED = 10
 
-export type TrainingSpeedMode = 'normal' | 'ultra'
 export type RestoredTrainingInfo = {
   populationSize: number
   generation: number
@@ -104,8 +111,6 @@ export class GameEngine {
   private generationEnding = false
   /** false após “Limpar” — evita regravar no localStorage (beforeunload / saveTraining). */
   private persistTrainingEnabled = true
-  ultraTurbo = false
-  private ultraRedrawPending = true
   private hallOfFameScore = 0
   private hallOfFameSnapshot: NetworkSnapshot | null = null
 
@@ -143,30 +148,8 @@ export class GameEngine {
       this.gameSpeed = 1
       return
     }
-    if (this.ultraTurbo) return
-    this.gameSpeed = Math.max(1, Math.min(10, Math.round(speed) || 1))
+    this.gameSpeed = Math.max(1, Math.min(MAX_GAME_SPEED, Math.round(speed) || 1))
     this.simAccumulator = Math.min(this.simAccumulator, 1)
-  }
-
-  setUltraTurbo(enabled: boolean) {
-    if (this.playerMode) {
-      this.ultraTurbo = false
-      return
-    }
-    this.ultraTurbo = enabled
-    this.ultraRedrawPending = true
-    this.simAccumulator = 0
-    if (enabled) {
-      this.callbacks.onUiEvent({
-        genScoreMsg:
-          'Ultraturbo: simulação em rajada (sem desenho). Hall of fame preserva o melhor genoma — não garante zero falhas.',
-      })
-      setTimeout(() => this.callbacks.onUiEvent({ genScoreMsg: null }), 4000)
-    }
-  }
-
-  getUltraTurbo() {
-    return this.ultraTurbo
   }
 
   setPaused(paused: boolean) {
@@ -266,8 +249,6 @@ export class GameEngine {
     this.gameSpeed = 1
     this.simAccumulator = 0
     this.generationEnding = false
-    this.ultraTurbo = false
-    this.ultraRedrawPending = true
     this.hallOfFameScore = 0
     this.hallOfFameSnapshot = null
     this.lastGeneralizacao = null
@@ -283,9 +264,23 @@ export class GameEngine {
     setTimeout(() => this.callbacks.onUiEvent({ genScoreMsg: null }), 2500)
   }
 
+  /** Preferências de arquitetura (localStorage) antes do treino completo. */
+  private applyStoredNnPrefs() {
+    const prefs = loadNnPrefs()
+    if (!prefs) return
+    const arch = {
+      inputMode: prefs.inputMode,
+      hiddenSize: prefs.hiddenSize,
+    }
+    this.population.setArchitecture(arch)
+    this.population.setEvalSeedCount(prefs.evalSeeds)
+    this.displayNn = new NeuralNetwork(arch)
+  }
+
   private boot() {
     if (this.started) return
     this.started = true
+    this.applyStoredNnPrefs()
     this.tryRestoreFromStorage()
     if (this.world.pipes.length === 0 && this.world.frame === 0) {
       this.startFreshRun()
@@ -382,6 +377,11 @@ export class GameEngine {
     }
     this.syncDisplayFromChampion()
     this.persistTrainingEnabled = true
+    saveNnPrefs({
+      inputMode: config.architecture.inputMode,
+      hiddenSize: config.architecture.hiddenSize,
+      evalSeeds: config.evalSeeds,
+    })
     this.callbacks.onUiEvent({
       genScoreMsg: `Rede ${architectureLabel(config.architecture)} · ${config.evalSeeds} mapa(s)/pássaro`,
     })
@@ -420,8 +420,8 @@ export class GameEngine {
     )
     if (!ok) return
 
-    this.training.recorde = saved.recorde
-    this.training.historico = [...saved.historico]
+    this.training.recorde = roundScore(saved.recorde)
+    this.training.historico = saved.historico.map(roundScore)
     this.training.lastAvg = saved.lastAvg
     this.training.lastBest = saved.lastBest
     if (typeof saved.hallOfFame === 'number' && saved.hallOfFame > 0) {
@@ -500,7 +500,7 @@ export class GameEngine {
       }
     }
     if (n === 0) return 0
-    return Math.round((sum / n) * 10) / 10
+    return roundScore(sum / n)
   }
 
   private buildEvolucaoInfo(): PanelEvolucao {
@@ -562,8 +562,18 @@ export class GameEngine {
           }
         : null
 
+    const panelInputs: PanelState['inputs'] = {
+      distancia_cano: inp.distancia_cano,
+      altura_passaro: inp.altura_passaro,
+      velocidade: inp.velocidade,
+    }
+    if (arch.inputMode === 'extended' && 'distancia_segundo' in inp) {
+      panelInputs.distancia_segundo = inp.distancia_segundo
+      panelInputs.altura_segundo = inp.altura_segundo
+    }
+
     return {
-      inputs: inp,
+      inputs: panelInputs,
       arquitetura: {
         label: architectureLabel(arch),
         inputMode: arch.inputMode,
@@ -666,8 +676,9 @@ export class GameEngine {
   }
 
   private updateHallOfFame(score: number, snapshot: NetworkSnapshot | null) {
-    if (!snapshot || score <= this.hallOfFameScore) return
-    this.hallOfFameScore = score
+    const pts = roundScore(score)
+    if (!snapshot || pts <= this.hallOfFameScore) return
+    this.hallOfFameScore = pts
     this.hallOfFameSnapshot = snapshot
   }
 
@@ -691,7 +702,7 @@ export class GameEngine {
     this.syncDisplayFromChampion()
   }
 
-  private onGenerationComplete() {
+  private async onGenerationComplete() {
     if (this.playerMode || this.generationEnding) return
 
     this.generationEnding = true
@@ -699,55 +710,64 @@ export class GameEngine {
       this.training.historico[this.training.historico.length - 1] ??
       this.training.lastBest ??
       0
-    let result: ReturnType<PopulationMode['endGeneration']>
+
+    const evalSeeds = this.population.getEvalSeedCount()
+    const pop = this.population.size
+    if (evalSeeds > 1) {
+      this.callbacks.onUiEvent({
+        backpropDeath: true,
+        backpropAdjusting: `Avaliando fitness (${evalSeeds} mapas × ${pop} pássaros)…`,
+      })
+    }
+
+    let result: Awaited<ReturnType<PopulationMode['endGeneration']>>
     try {
-      result = this.population.endGeneration(previousBest)
+      result = await this.population.endGeneration(previousBest)
     } catch (err) {
       console.error('[Flappy] Falha ao evoluir geração:', err)
       this.generationEnding = false
+      this.callbacks.onUiEvent({ backpropDeath: false, backpropAdjusting: '' })
       this.startFreshRun()
       this.restartLoopIfNeeded()
       return
     }
 
-    const hallScore =
-      result.evalSeeds > 1 ? result.fitnessBest : result.bestScore
-    if (result.generationBestSnapshot) {
-      this.updateHallOfFame(hallScore, result.generationBestSnapshot)
+    const visualBest = roundScore(result.bestScore)
+    if (result.visualBestSnapshot) {
+      this.updateHallOfFame(visualBest, result.visualBestSnapshot)
     }
-    this.installHallOfFameChampion(hallScore)
+    this.installHallOfFameChampion(visualBest)
 
     this.simAccumulator = 0
     // Mundo novo + pássaros no início (evita renascer dentro de cano antigo)
     this.startFreshRun()
     this.generationEnding = false
-    this.ultraRedrawPending = true
-
-    const chartScore =
-      result.evalSeeds > 1 ? result.fitnessBest : result.bestScore
-    this.training.lastBest = chartScore
-    this.training.lastAvg = result.fitnessAvg
+    // Recorde e gráfico = partida visível (o que aparece no canvas)
+    const chartScore = visualBest
+    this.training.lastBest =
+      result.evalSeeds > 1 ? roundScore(result.fitnessBest) : chartScore
+    this.training.lastAvg = roundScore(result.fitnessAvg)
     this.training.historico.push(chartScore)
     this.lastGeneralizacao = {
       evalSeeds: result.evalSeeds,
-      melhorVisual: result.bestScore,
-      melhorFitness: result.fitnessBest,
-      mediaFitness: result.fitnessAvg,
+      melhorVisual: roundScore(result.bestScore),
+      melhorFitness: roundScore(result.fitnessBest),
+      mediaFitness: roundScore(result.fitnessAvg),
     }
 
-    if (chartScore > this.training.recorde) {
-      this.training.recorde = chartScore
+    if (visualBest > this.training.recorde) {
+      this.training.recorde = visualBest
       this.callbacks.onUiEvent({
         flashRecord: Date.now(),
-        recordBanner: `🏆 NOVO RECORDE: ${chartScore}`,
+        recordBanner: `🏆 NOVO RECORDE: ${visualBest}`,
       })
       setTimeout(() => this.callbacks.onUiEvent({ recordBanner: null }), 2000)
     }
 
     const genMsg =
       result.evalSeeds > 1
-        ? `G${result.generation - 1}: fitness ${result.fitnessBest.toFixed(1)} (${result.evalSeeds} mapas) · visual ${result.bestScore}`
-        : `G${result.generation - 1}: melhor ${result.bestScore} · média ${result.avgScore.toFixed(1)}`
+        ? `G${result.generation - 1}: fitness ${roundScore(result.fitnessBest)} (${result.evalSeeds} mapas) · visual ${roundScore(result.bestScore)}`
+        : `G${result.generation - 1}: melhor ${roundScore(result.bestScore)} · média ${roundScore(result.avgScore)}`
     this.callbacks.onUiEvent({
       genScoreMsg: `${genMsg} (${this.population.size} pássaros)`,
     })
@@ -771,7 +791,7 @@ export class GameEngine {
     setTimeout(() => {
       this.callbacks.onUiEvent({
         backpropDeath: false,
-        backpropAdjusting: `✓ G${g} · melhor ${result.bestScore} · média ${result.avgScore.toFixed(1)}`,
+        backpropAdjusting: `✓ G${g} · melhor ${roundScore(result.bestScore)} · média ${roundScore(result.avgScore)}`,
       })
     }, 600)
     setTimeout(() => {
@@ -779,11 +799,7 @@ export class GameEngine {
     }, 1400)
 
     this.persistTrainingEnabled = true
-    this.saveTraining()
-
-    if (this.ultraTurbo) {
-      this.callbacks.onState(this.buildPanelState())
-    }
+    queueMicrotask(() => this.saveTraining())
   }
 
   private drawBirdSprite(
@@ -918,11 +934,8 @@ export class GameEngine {
       ctx.fillStyle = 'rgba(0,0,0,0.35)'
       ctx.fillRect(4, GAME_HEIGHT - 22, 130, 18)
       ctx.fillStyle = '#e2e8f0'
-      const speedLabel = this.ultraTurbo
-        ? 'UT'
-        : `×${this.gameSpeed}`
       ctx.fillText(
-        `${this.training.vivos}/${this.population.size} vivos · ${speedLabel}`,
+        `${this.training.vivos}/${this.population.size} vivos · ×${this.gameSpeed}`,
         8,
         GAME_HEIGHT - 8
       )
@@ -937,24 +950,6 @@ export class GameEngine {
   private runSimulationSteps(dt: number) {
     if (this.playerMode) {
       if (this.playerAwaitingStart) return
-    }
-
-    if (this.ultraTurbo) {
-      let steps = 0
-      while (steps < ULTRA_BURST_STEPS) {
-        steps++
-        const result = this.population.step(this.world, 1, {
-          playerControl: false,
-          playerFlap: false,
-        })
-        this.training.vivos = result.alive
-        if (result.allDead) {
-          this.onGenerationComplete()
-          break
-        }
-      }
-      this.syncDisplayFromChampion()
-      return
     }
 
     this.simAccumulator += dt * this.gameSpeed
@@ -979,7 +974,7 @@ export class GameEngine {
         if (this.playerMode) {
           this.onPlayerDeath()
         } else {
-          this.onGenerationComplete()
+          void this.onGenerationComplete()
         }
         break
       }
@@ -1015,18 +1010,10 @@ export class GameEngine {
         this.runSimulationSteps(dt)
       }
 
-      const drawThisFrame =
-        !this.ultraTurbo ||
-        this.ultraRedrawPending ||
-        awaitingStart ||
-        this.paused
-      if (drawThisFrame) {
-        this.draw()
-        this.ultraRedrawPending = false
-      }
+      this.draw()
 
       this.frames++
-      if (!this.ultraTurbo && this.shouldSyncPanel()) {
+      if (this.shouldSyncPanel()) {
         this.callbacks.onState(this.buildPanelState())
       }
     } catch (err) {

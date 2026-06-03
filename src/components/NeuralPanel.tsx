@@ -1,23 +1,24 @@
+/**
+ * Painel lateral: sentidos da IA, decisão, pesos, gráfico de progresso, diagrama da rede, evolução.
+ * Só mostra dados — quem calcula é o GameEngine.
+ * Guia: docs/GUIA-DO-CODIGO.md
+ */
 import { useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
 import { EvolutionSection } from '@/components/panel/EvolutionSection'
 import { ProgressBlock } from '@/components/panel/ProgressBlock'
-import {
-  distStatus,
-  heightStatus,
-  MetricBar,
-  velStatus,
-} from '@/components/panel/MetricBar'
+import { AiSensesBlock } from '@/components/panel/AiSensesBlock'
 import { NetworkConfigPicker } from '@/components/panel/NetworkConfigPicker'
 import { NetworkDiagram } from '@/components/panel/NetworkDiagram'
 import { PopulationInput } from '@/components/panel/PopulationInput'
 import type { NnConfigState } from '@/game/game-engine'
 import type { PanelState, PanelUiEvents } from '@/lib/panel-types'
+import { formatScore } from '@/lib/score'
 import { cn } from '@/lib/utils'
 import type { GameMode } from '@/game/game-engine'
-import { Pause, Play, Trash2, User, Brain, Zap } from 'lucide-react'
+import { Pause, Play, Trash2, User, Brain } from 'lucide-react'
 
 type NeuralPanelProps = {
   state: PanelState | null
@@ -25,10 +26,8 @@ type NeuralPanelProps = {
   ui: PanelUiEvents
   paused: boolean
   speed: number
-  ultraTurbo: boolean
   gameMode: GameMode
   onSpeedChange: (s: number) => void
-  onUltraTurboToggle: () => void
   onPauseToggle: () => void
   onModeChange: (mode: GameMode) => void
   onClearTraining: () => void
@@ -64,10 +63,8 @@ export function NeuralPanel({
   ui,
   paused,
   speed,
-  ultraTurbo,
   gameMode,
   onSpeedChange,
-  onUltraTurboToggle,
   onPauseToggle,
   onModeChange,
   onClearTraining,
@@ -171,23 +168,7 @@ export function NeuralPanel({
               Limpar
             </Button>
           )}
-          {!isPlayer && (
-            <Button
-              variant={ultraTurbo ? 'default' : 'outline'}
-              size="sm"
-              className={cn(
-                'h-7 gap-1 px-2 text-[10px]',
-                ultraTurbo && 'bg-amber-600 hover:bg-amber-600/90'
-              )}
-              title="Rajada de simulação sem desenho entre passos — treino muito mais rápido. Não garante que o pássaro nunca morra."
-              onClick={onUltraTurboToggle}
-            >
-              <Zap className="size-3" />
-              UT
-            </Button>
-          )}
           {!isPlayer &&
-            !ultraTurbo &&
             [1, 5, 10].map((s) => (
               <Button
                 key={s}
@@ -260,39 +241,20 @@ export function NeuralPanel({
             <p className="mt-1.5 text-[9px] tabular-nums text-muted-foreground">
               Última geração: fitness{' '}
               <span className="text-sky-400">
-                {state.generalizacao.melhorFitness.toFixed(1)}
+                {formatScore(state.generalizacao.melhorFitness)}
               </span>{' '}
               (média {state.generalizacao.evalSeeds} circuitos) · partida visível{' '}
-              {state.generalizacao.melhorVisual}
+              {formatScore(state.generalizacao.melhorVisual)}
             </p>
           )}
         </PanelBlock>
 
         <PanelBlock title="👁 O que a IA vê">
-          <div className="space-y-1.5">
-            <MetricBar
-              label="Cano"
-              value={slow.inputs.distancia_cano}
-              status={distStatus(slow.inputs.distancia_cano)}
-              danger={slow.inputs.distancia_cano < 0.25}
-            />
-            <MetricBar
-              label="Abertura"
-              value={slow.inputs.altura_passaro}
-              status={heightStatus(slow.inputs.altura_passaro)}
-              danger={
-                slow.inputs.altura_passaro < 0.2 ||
-                slow.inputs.altura_passaro > 0.8
-              }
-            />
-            <MetricBar
-              label="Queda"
-              value={(slow.inputs.velocidade + 1) / 2}
-              displayValue={(slow.inputs.velocidade + 1) / 2}
-              status={velStatus(slow.inputs.velocidade)}
-              danger={slow.inputs.velocidade > 0.5}
-            />
-          </div>
+          <AiSensesBlock
+            inputs={slow.inputs}
+            inputMode={state.arquitetura.inputMode}
+            inputSize={state.arquitetura.inputSize}
+          />
         </PanelBlock>
 
         <PanelBlock title="⚡ Decisão" className="border-primary/25 bg-card/90">

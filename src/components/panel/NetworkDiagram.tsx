@@ -5,6 +5,9 @@ import { cn } from '@/lib/utils'
 /** Ativação sigmoid: acima disso o nó é considerado “ligado”. */
 const ACTIVATION_ON = 0.55
 
+/** Faixa superior reservada para rótulos Entrada / Oculta / Saída. */
+const DIAGRAM_HEADER_H = 26
+
 function spreadY(count: number, top: number, bottom: number) {
   if (count <= 1) return [(top + bottom) / 2]
   const step = (bottom - top) / (count - 1)
@@ -12,14 +15,17 @@ function spreadY(count: number, top: number, bottom: number) {
 }
 
 function buildDiagramLayout(inputCount: number, hiddenCount: number) {
-  const viewH = Math.max(132, 24 + Math.max(inputCount, hiddenCount) * 22)
-  const midY = viewH / 2
+  const bodyTop = DIAGRAM_HEADER_H + 10
+  const bodyBottom = bodyTop + Math.max(inputCount, hiddenCount) * 24
+  const viewH = Math.max(140, bodyBottom + 18)
+  const bodyMid = (bodyTop + viewH - 14) / 2
   return {
     viewH,
     viewW: 340,
-    input: spreadY(inputCount, 22, viewH - 22).map((y) => ({ x: 58, y })),
-    hidden: spreadY(hiddenCount, 16, viewH - 16).map((y) => ({ x: 172, y })),
-    output: [{ x: 292, y: midY }],
+    headerH: DIAGRAM_HEADER_H,
+    input: spreadY(inputCount, bodyTop, viewH - 14).map((y) => ({ x: 58, y })),
+    hidden: spreadY(hiddenCount, bodyTop, viewH - 14).map((y) => ({ x: 172, y })),
+    output: [{ x: 292, y: bodyMid }],
   }
 }
 
@@ -297,8 +303,9 @@ function LayerTitle({
   sub: string
 }) {
   return (
-    <g transform={`translate(${x},10)`}>
+    <g transform={`translate(${x}, 0)`}>
       <text
+        y={9}
         textAnchor="middle"
         fontSize={8}
         fontWeight={600}
@@ -306,7 +313,7 @@ function LayerTitle({
       >
         {text}
       </text>
-      <text textAnchor="middle" y={10} fontSize={6.5} fill="#64748b">
+      <text y={18} textAnchor="middle" fontSize={6.5} fill="#64748b">
         {sub}
       </text>
     </g>
@@ -339,16 +346,16 @@ function InputNeuron({
       <title>{`${label}: ${hint}\nAgora: ${live} · ativação ${v.toFixed(2)}`}</title>
       <text
         x={-14}
-        y={-14}
+        y={-12}
         textAnchor="end"
-        fontSize={7.5}
+        fontSize={7}
         fontWeight={600}
         fill={active ? '#e2e8f0' : '#64748b'}
       >
         {label}
       </text>
       {primary && active && (
-        <text x={-14} y={-5} textAnchor="end" fontSize={6} fill="#38bdf8">
+        <text x={-14} y={-4} textAnchor="end" fontSize={6} fill="#38bdf8">
           ↑ forte
         </text>
       )}
@@ -402,7 +409,7 @@ function HiddenNeuron({
         N{index + 1}
       </text>
       {primary && (
-        <text x={14} y={-10} fontSize={6} fill="#38bdf8">
+        <text x={14} y={-12} fontSize={5.5} fill="#38bdf8">
           mais ativo
         </text>
       )}
@@ -443,9 +450,9 @@ function OutputNeuron({
       </title>
       <text
         x={14}
-        y={-12}
+        y={-10}
         textAnchor="start"
-        fontSize={7.5}
+        fontSize={7}
         fontWeight={600}
         fill={wantsFlap ? '#6ee7b7' : '#94a3b8'}
       >

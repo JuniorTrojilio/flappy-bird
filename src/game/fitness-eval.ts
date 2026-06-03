@@ -1,3 +1,8 @@
+/**
+ * Simula partidas “invisíveis” para medir quão boa é uma rede em vários mapas (generalização).
+ * Roda no Worker quando possível para não travar a tela.
+ * Guia: docs/GUIA-DO-CODIGO.md
+ */
 import {
   birdHitsPipeAlongPath,
   type PipeCollisionConfig,

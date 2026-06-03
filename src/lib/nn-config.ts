@@ -1,3 +1,8 @@
+/**
+ * Configuração da rede: quantas entradas (3 ou 5), neurônios ocultos, quantos mapas no fitness.
+ * O painel e o localStorage usam esses valores.
+ * Guia: docs/GUIA-DO-CODIGO.md
+ */
 import type { NetworkSnapshot } from '@/lib/neural-network'
 
 export const OUTPUT_SIZE = 1

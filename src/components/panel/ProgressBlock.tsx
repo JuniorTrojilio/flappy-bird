@@ -5,6 +5,7 @@ import {
   trendLabel,
   type ProgressTrend,
 } from '@/lib/progress-trend'
+import { formatScore } from '@/lib/score'
 import { Minus, TrendingDown, TrendingUp } from 'lucide-react'
 
 type ProgressBlockProps = {
@@ -57,9 +58,9 @@ export function ProgressBlock({
         <span className="text-[10px] tabular-nums text-muted-foreground">
           campeão <strong className="text-foreground">{pontuacaoAtual}</strong>
           {' '}
-          · melhor <strong className="text-sky-400">{melhorGeracao}</strong>
+          · melhor <strong className="text-sky-400">{formatScore(melhorGeracao)}</strong>
           {' '}
-          · média <strong className="text-foreground">{mediaGeracao}</strong>
+          · média <strong className="text-foreground">{formatScore(mediaGeracao)}</strong>
           {' '}
           · <strong className="text-emerald-400">{vivos}</strong>/{populacao} vivos
         </span>

@@ -1,12 +1,20 @@
+/**
+ * Tela principal: junta o canvas (jogo) e o painel da IA.
+ * Guarda botões (velocidade, pausa, limpar treino, modo jogador) e repassa tudo ao GameEngine.
+ * Guia completo: docs/GUIA-DO-CODIGO.md
+ */
 import { useCallback, useRef, useState } from 'react'
 import { GameCanvas } from '@/components/GameCanvas'
 import { NeuralPanel } from '@/components/NeuralPanel'
 import { GAME_WIDTH } from '@/game/constants'
 import type { GameEngine, GameMode, NnConfigState } from '@/game/game-engine'
-import { defaultArchitecture, clampEvalSeeds } from '@/lib/nn-config'
 import { clampPopulationSize } from '@/game/population-mode'
 import type { PanelState, PanelUiEvents } from '@/lib/panel-types'
-import { clearTrainingState } from '@/lib/training-storage'
+import {
+  clearTrainingState,
+  defaultNnPrefs,
+  loadNnPrefs,
+} from '@/lib/training-storage'
 
 /** Largura fixa da coluna do jogo (canvas + padding lateral) */
 const GAME_COLUMN_WIDTH = GAME_WIDTH + 48
@@ -24,14 +32,19 @@ export default function App() {
   const [panelState, setPanelState] = useState<PanelState | null>(null)
   const [ui, setUi] = useState<PanelUiEvents>(initialUi)
   const [speed, setSpeed] = useState(1)
-  const [ultraTurbo, setUltraTurbo] = useState(false)
   const [paused, setPaused] = useState(false)
   const [gameMode, setGameMode] = useState<GameMode>('ai')
   const [populationSize, setPopulationSize] = useState(1)
-  const [nnConfig, setNnConfig] = useState<NnConfigState>(() => ({
-    architecture: defaultArchitecture(),
-    evalSeeds: clampEvalSeeds(5),
-  }))
+  const [nnConfig, setNnConfig] = useState<NnConfigState>(() => {
+    const prefs = loadNnPrefs() ?? defaultNnPrefs()
+    return {
+      architecture: {
+        inputMode: prefs.inputMode,
+        hiddenSize: prefs.hiddenSize,
+      },
+      evalSeeds: prefs.evalSeeds,
+    }
+  })
   const frameRef = useRef(0)
   const speedRef = useRef(speed)
   speedRef.current = speed
@@ -52,18 +65,8 @@ export default function App() {
 
   const handleSpeedChange = useCallback((next: number) => {
     setSlowSnapshot(null)
-    setUltraTurbo(false)
-    engineRef.current?.setUltraTurbo(false)
     setSpeed(next)
   }, [])
-
-  const handleUltraTurboToggle = useCallback(() => {
-    const next = !ultraTurbo
-    setUltraTurbo(next)
-    setSlowSnapshot(null)
-    engineRef.current?.setUltraTurbo(next)
-    if (next) setSpeed(1)
-  }, [ultraTurbo])
 
   const onUiEvent = useCallback((patch: Partial<PanelUiEvents>) => {
     setUi((prev) => ({ ...prev, ...patch }))
@@ -116,15 +119,18 @@ export default function App() {
     setPopulationSize(1)
     setGameMode('ai')
     setSpeed(1)
-    setUltraTurbo(false)
     setPaused(false)
     setUi(initialUi)
     setPanelState(null)
     setSlowSnapshot(null)
     frameRef.current = 0
+    const prefs = defaultNnPrefs()
     setNnConfig({
-      architecture: defaultArchitecture(),
-      evalSeeds: clampEvalSeeds(5),
+      architecture: {
+        inputMode: prefs.inputMode,
+        hiddenSize: prefs.hiddenSize,
+      },
+      evalSeeds: prefs.evalSeeds,
     })
   }, [])
 
@@ -136,7 +142,6 @@ export default function App() {
       >
         <GameCanvas
           speed={speed}
-          ultraTurbo={ultraTurbo}
           paused={paused}
           gameMode={gameMode}
           ui={ui}
@@ -162,10 +167,8 @@ export default function App() {
           ui={ui}
           paused={paused}
           speed={speed}
-          ultraTurbo={ultraTurbo}
           gameMode={gameMode}
           onSpeedChange={handleSpeedChange}
-          onUltraTurboToggle={handleUltraTurboToggle}
           onPauseToggle={() => setPaused((p) => !p)}
           onModeChange={handleModeChange}
           onClearTraining={handleClearTraining}

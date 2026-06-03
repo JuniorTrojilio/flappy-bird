@@ -1,3 +1,8 @@
+/**
+ * Vários pássaros ao mesmo tempo: cada um tem sua rede, posição e pontuação.
+ * No fim da geração ranqueia por fitness e chama a evolução genética.
+ * Guia: docs/GUIA-DO-CODIGO.md
+ */
 import {
   BIRD_H,
   BIRD_HALF_EXTENT,
@@ -8,7 +13,7 @@ import {
   birdHitsPipeAlongPath,
   type PipeCollisionConfig,
 } from '@/game/collision'
-import { averageFitnessAcrossSeeds } from '@/game/fitness-eval'
+import { evaluateFitnessBatch } from '@/game/fitness-worker-client'
 import { computeNnInputs } from '@/game/nn-inputs'
 import {
   clampEvalSeeds,
@@ -17,6 +22,7 @@ import {
   type NnArchitecture,
 } from '@/lib/nn-config'
 import { evolvePopulation } from '@/lib/population-evolution'
+import { roundScore } from '@/lib/score'
 import type { NetworkSnapshot } from '@/lib/neural-network'
 import { NeuralNetwork } from '@/lib/neural-network'
 
@@ -61,8 +67,8 @@ export type GenerationEndResult = {
   avgScore: number
   bestIndex: number
   generation: number
-  /** Rede do melhor pássaro desta geração (antes da mutação). */
-  generationBestSnapshot: NetworkSnapshot | null
+  /** Rede do melhor pássaro na partida visível (antes da mutação). */
+  visualBestSnapshot: NetworkSnapshot | null
   /** Fitness usado na evolução (média em N seeds, se N>1). */
   fitnessBest: number
   fitnessAvg: number
@@ -130,17 +136,15 @@ export class PopulationMode {
     } as const
   }
 
-  private computeFitnessScores(): number[] {
+  private async computeFitnessScores(): Promise<number[]> {
     const base = (this.generation * 10007) >>> 0
-    return this.networks.map((net, i) =>
-      Math.round(
-        averageFitnessAcrossSeeds(
-          net,
-          this.evalSeedCount,
-          (base + i * 997) >>> 0,
-          this.fitnessSimConfig()
-        ) * 10
-      ) / 10
+    const snapshots = this.networks.map((n) => n.toSnapshot())
+    return evaluateFitnessBatch(
+      snapshots,
+      this.arch,
+      this.evalSeedCount,
+      base,
+      this.fitnessSimConfig()
     )
   }
 
@@ -158,6 +162,20 @@ export class PopulationMode {
     this.rankedSnapshots = ranked.map((r) =>
       this.networks[r.index].toSnapshot()
     )
+  }
+
+  /** Melhor rede segundo pontuação da partida que você viu no canvas. */
+  private snapshotOfBestScore(scores: number[]): NetworkSnapshot | null {
+    let bestIdx = 0
+    let best = -1
+    for (let i = 0; i < scores.length; i++) {
+      if (scores[i] > best) {
+        best = scores[i]
+        bestIdx = i
+      }
+    }
+    if (best < 0) return null
+    return this.networks[bestIdx]?.toSnapshot() ?? null
   }
 
   private captureRankedSnapshots(scores: number[]) {
@@ -416,13 +434,14 @@ export class PopulationMode {
     }
   }
 
-  endGeneration(previousBest = 0): GenerationEndResult {
+  async endGeneration(previousBest = 0): Promise<GenerationEndResult> {
     const visualScores = Array.from(this.score)
+    const visualBestSnapshot = this.snapshotOfBestScore(visualScores)
     const fitnessScores =
       this.evalSeedCount > 1
-        ? this.computeFitnessScores()
+        ? await this.computeFitnessScores()
         : visualScores.map((s) => s)
-    // Antes de evoluir: ranking pelo fitness (generalização)
+    // Evolução: ranking pelo fitness (média em vários mapas)
     this.captureRankedSnapshots(fitnessScores)
     const evolved = evolvePopulation(this.networks, fitnessScores, {
       previousBest,
@@ -439,16 +458,17 @@ export class PopulationMode {
       // 1 pássaro: mantém rede já mutada e atualiza snapshot para resize
       this.rankedSnapshots = [this.networks[0].toSnapshot()]
     }
-    const fitnessBest = Math.max(0, ...fitnessScores)
-    const fitnessAvg =
+    const fitnessBest = roundScore(Math.max(0, ...fitnessScores))
+    const fitnessAvg = roundScore(
       fitnessScores.reduce((a, b) => a + b, 0) / Math.max(fitnessScores.length, 1)
+    )
 
     return {
       bestScore: Math.max(0, ...visualScores),
       avgScore: evolved.avgScore,
       bestIndex: evolved.bestIndex,
       generation: this.generation,
-      generationBestSnapshot: this.rankedSnapshots[0] ?? null,
+      visualBestSnapshot,
       fitnessBest,
       fitnessAvg,
       fitnessScores,
