@@ -62,26 +62,36 @@ const startBtn = {
 }
 
 //CONTROLE DE ESTADOS DO GAME
-document.addEventListener("click", function (evt) {
+function startGame() {
+  state.current = state.game
+  bird.speedReset()
+  bird.animTimer = 0
+  bird.flap()
+  pipes.spawnTimer = 0
+  SWOOSHING.play()
+}
+
+function flapInGame() {
+  if (bird.y > -50) bird.flap()
+  FLAP.play()
+}
+
+function handleInput(evt) {
   switch (state.current) {
     case state.getReady:
-      state.current = state.game
-      SWOOSHING.play()
+      startGame()
       break
 
-    case state.game:      
-      if (bird.y > -50)
-      bird.flap()
-
-      FLAP.play()
+    case state.game:
+      flapInGame()
       break
 
     case state.over:
-      let rect = cvs.getBoundingClientRect()
-      let clickX = evt.clientX - rect.left
-      let clickY = evt.clientY - rect.top
+      if (!evt || evt.clientX === undefined) return
+      const rect = cvs.getBoundingClientRect()
+      const clickX = evt.clientX - rect.left
+      const clickY = evt.clientY - rect.top
 
-      //VERIFICAR SE CLIQUEI NO BOTÃO DE START
       if (clickX >= startBtn.x && clickX <= startBtn.x + startBtn.w && clickY >= startBtn.y && clickY <= startBtn.y + startBtn.h) {
         pipes.reset()
         bird.speedReset()
@@ -90,6 +100,18 @@ document.addEventListener("click", function (evt) {
       }
       break
   }
+}
+
+document.addEventListener("pointerdown", function (evt) {
+  if (evt.button !== 0) return
+  handleInput(evt)
+})
+
+document.addEventListener("keydown", function (evt) {
+  if (evt.code !== "Space" && evt.code !== "ArrowUp") return
+  evt.preventDefault()
+  if (state.current === state.over) return
+  handleInput(evt)
 })
 
 //BACKGROUND
@@ -125,9 +147,9 @@ const fg = {
       this.y, this.w, this.h)
   },
 
-  update: function () {
+  update: function (dt) {
     if (state.current == state.game) {
-      this.x = (this.x - this.dx) % (this.w / 2)
+      this.x = (this.x - this.dx * dt) % (this.w / 2)
     }
   }
 }
@@ -176,31 +198,30 @@ const bird = {
     this.speed = -this.jump
   },
 
-  update: function () {
+  update: function (dt) {
     //SE O JOGO ESTÁ EM ESTADO INICIAL, O PASSARINHO BATE ASA DEVAGAR
     //DO CONTRÁRIO BATE RAPIDO
     this.period = state.current == state.getReady ? 10 : 5
-    //CADA PERIODO INCREMENTAMOS OS FRAMES EM 1
-    this.frame += frames % this.period == 0 ? 1 : 0
-    //OS FRAMES VÃO DE 0 A 4 E VOLTÃO PRA 0
-    this.frame = this.frame % this.animation.length
+    this.animTimer = (this.animTimer || 0) + dt
+    if (this.animTimer >= this.period) {
+      this.frame = (this.frame + 1) % this.animation.length
+      this.animTimer = 0
+    }
 
     if (state.current == state.getReady) {
-      this.y = 150 //RESETAR POSIÇÃO APÓS GAME OVER
+      this.y = 150
+      this.speed = 0
       this.rotation = 0 * DEGREE
-    } else {
-      this.speed += this.gravity
-      this.y += this.speed
+    } else if (state.current == state.game) {
+      this.speed += this.gravity * dt
+      this.y += this.speed * dt
 
-      if (this.y + this.h / 2 >= cvs.height - fg.h){
-        this.y = cvs.height - fg.h - this.h / 2  
-        if (state.current == state.game) {
-          state.current = state.over
-          DIE.play()
-        }
-      }      
+      if (this.y + this.h / 2 >= cvs.height - fg.h) {
+        this.y = cvs.height - fg.h - this.h / 2
+        state.current = state.over
+        DIE.play()
+      }
 
-      //SE A VELOCIDADE É MAIOR SIGUINIFICA QUE O PASSARO ESTÁ CAINDO 
       if (this.speed >= this.jump) {
         this.rotation = 90 * DEGREE
         this.frame = 1
@@ -264,6 +285,7 @@ const pipes = {
   gap: 85,
   maxYPos: -150,
   dx: 2,
+  spawnTimer: 0,
 
   draw: function () {
     for (let i = 0; i < this.position.length; i++) {
@@ -280,10 +302,12 @@ const pipes = {
         bottomYPos, this.w, this.h)
     }
   },
-  update: function () {
+  update: function (dt) {
     if (state.current !== state.game) return
 
-    if (frames % 100 == 0) {
+    this.spawnTimer += dt
+    if (this.spawnTimer >= 100) {
+      this.spawnTimer = 0
       this.position.push({
         x: cvs.width,
         y: this.maxYPos * (Math.random() + 1)
@@ -310,7 +334,7 @@ const pipes = {
       }
 
       //MOVER OS PIPES PARA A ESQUERDA
-      p.x -= this.dx
+      p.x -= this.dx * dt
 
       //DELETAR PIPES DO ARRAY SE SAIREM DO CANVAS
       if (p.x + this.w <= 0) {
@@ -324,6 +348,7 @@ const pipes = {
   },
   reset: function () {
     this.position = []
+    this.spawnTimer = 0
   }
 }
 
@@ -373,15 +398,19 @@ function draw() {
 }
 
 //ATUALIZANDO
-function update() {
-  bird.update()
-  fg.update()
-  pipes.update()
+function update(dt) {
+  bird.update(dt)
+  fg.update(dt)
+  pipes.update(dt)
 }
 
 //FUNÇÃO PARA MANTE O LOOP E INICIALIZAÇÃO
-function loop() {
-  update()
+let lastTime = 0
+
+function loop(now = 0) {
+  const dt = lastTime ? Math.min((now - lastTime) / 16.67, 3) : 1
+  lastTime = now
+  update(dt)
   draw()
   frames++
   requestAnimationFrame(loop)
@@ -395,7 +424,7 @@ function loop() {
   // }     
 }
 
-loop() 
+requestAnimationFrame(loop)
   </script>
 </body>
 </html>
