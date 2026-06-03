@@ -1,0 +1,81 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+}
+
+:root {
+  --radius: 0.5rem;
+  --background: oklch(0.129 0.042 264.695);
+  --foreground: oklch(0.984 0.003 247.858);
+  --card: oklch(0.18 0.034 264.665);
+  --card-foreground: oklch(0.984 0.003 247.858);
+  --primary: oklch(0.623 0.214 259.815);
+  --primary-foreground: oklch(0.984 0.003 247.858);
+  --secondary: oklch(0.279 0.041 260.031);
+  --secondary-foreground: oklch(0.984 0.003 247.858);
+  --muted: oklch(0.279 0.041 260.031);
+  --muted-foreground: oklch(0.704 0.04 256.788);
+  --accent: oklch(0.279 0.041 260.031);
+  --accent-foreground: oklch(0.984 0.003 247.858);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.35 0.04 260);
+  --input: oklch(0.35 0.04 260);
+  --ring: oklch(0.623 0.214 259.815);
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    margin: 0;
+    overflow: hidden;
+  }
+  html {
+    overflow: hidden;
+  }
+}
+
+/* Evita “pulo” quando a barra de rolagem aparece/desaparece */
+[data-slot="scroll-area-viewport"],
+.panel-scroll-stable {
+  scrollbar-gutter: stable;
+}
+
+.panel-flash-record {
+  animation: flashGold 2s ease;
+}
+@keyframes flashGold {
+  30%,
+  70% {
+    background-color: oklch(0.28 0.08 85);
+    box-shadow: inset 0 0 40px oklch(0.75 0.15 85);
+  }
+}
+
+.panel-mono {
+  font-family: ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace;
+}
