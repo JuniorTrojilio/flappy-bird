@@ -15,7 +15,7 @@ import { PopulationInput } from '@/components/panel/PopulationInput'
 import type { PanelState, PanelUiEvents } from '@/lib/panel-types'
 import { cn } from '@/lib/utils'
 import type { GameMode } from '@/game/game-engine'
-import { Pause, Play, Trash2, User, Brain } from 'lucide-react'
+import { Pause, Play, Trash2, User, Brain, Zap } from 'lucide-react'
 
 type NeuralPanelProps = {
   state: PanelState | null
@@ -23,8 +23,10 @@ type NeuralPanelProps = {
   ui: PanelUiEvents
   paused: boolean
   speed: number
+  ultraTurbo: boolean
   gameMode: GameMode
   onSpeedChange: (s: number) => void
+  onUltraTurboToggle: () => void
   onPauseToggle: () => void
   onModeChange: (mode: GameMode) => void
   onClearTraining: () => void
@@ -58,8 +60,10 @@ export function NeuralPanel({
   ui,
   paused,
   speed,
+  ultraTurbo,
   gameMode,
   onSpeedChange,
+  onUltraTurboToggle,
   onPauseToggle,
   onModeChange,
   onClearTraining,
@@ -113,6 +117,11 @@ export function NeuralPanel({
           <span className="text-muted-foreground">Rec </span>
           <span className="font-semibold text-sky-400">{state.progresso.recorde}</span>
         </span>
+        {!isPlayer && state.progresso.hallOfFame > 0 && (
+          <span className="text-[10px] tabular-nums text-amber-400/90">
+            hall {state.progresso.hallOfFame}
+          </span>
+        )}
         {!isPlayer && (
           <span className="text-[10px] text-muted-foreground">
             {state.progresso.vivos}/{state.progresso.populacao} pássaros
@@ -151,13 +160,34 @@ export function NeuralPanel({
               Limpar
             </Button>
           )}
+          {!isPlayer && (
+            <Button
+              variant={ultraTurbo ? 'default' : 'outline'}
+              size="sm"
+              className={cn(
+                'h-7 gap-1 px-2 text-[10px]',
+                ultraTurbo && 'bg-amber-600 hover:bg-amber-600/90'
+              )}
+              title="Rajada de simulação sem desenho entre passos — treino muito mais rápido. Não garante que o pássaro nunca morra."
+              onClick={onUltraTurboToggle}
+            >
+              <Zap className="size-3" />
+              UT
+            </Button>
+          )}
           {!isPlayer &&
+            !ultraTurbo &&
             [1, 5, 10].map((s) => (
               <Button
                 key={s}
                 variant={speed === s ? 'default' : 'secondary'}
                 size="sm"
                 className="h-7 px-2 text-xs"
+                title={
+                  s === 1
+                    ? '1 passo de simulação por frame — referência do treino'
+                    : `${s} passos por frame — só acelera o relógio; física e evolução por passo iguais ao ×1`
+                }
                 onClick={() => onSpeedChange(s)}
               >
                 ×{s}
@@ -177,46 +207,43 @@ export function NeuralPanel({
 
       {isPlayer ? (
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 p-8 text-center">
-          {state.playerAguardandoInicio ? (
-            <>
-              <p className="text-3xl font-bold text-amber-400">Fim de jogo</p>
-              <p className="text-5xl font-bold tabular-nums text-sky-400">
-                {state.progresso.pontuacao}
-              </p>
-              <p className="text-sm text-muted-foreground">
-                Recorde {state.progresso.recorde}
-              </p>
-              <p className="max-w-sm text-sm leading-relaxed text-muted-foreground">
-                Clique no jogo ou pressione <strong>Espaço</strong> /{' '}
-                <strong>↑</strong> para jogar de novo.
-              </p>
-              <Button size="sm" className="mt-2" onClick={onPlayerRestart}>
-                Jogar novamente
-              </Button>
-            </>
-          ) : (
-            <>
-              <p className="text-4xl font-bold tabular-nums text-sky-400">
-                {state.progresso.pontuacao}
-              </p>
-              <p className="text-sm text-muted-foreground">
-                Pontuação atual · recorde {state.progresso.recorde}
-              </p>
-              <p className="max-w-sm text-xs leading-relaxed text-muted-foreground">
-                Use <strong className="text-foreground">Espaço</strong>,{' '}
-                <strong className="text-foreground">↑</strong> ou{' '}
-                <strong className="text-foreground">clique no jogo</strong> para bater asa.
-              </p>
-            </>
-          )}
+          <p className="text-2xl font-bold text-sky-400">Modo jogador</p>
+          <p className="max-w-sm text-sm leading-relaxed text-muted-foreground">
+            {state.playerAguardandoInicio ? (
+              state.progresso.pontuacao > 0 ? (
+                <>
+                  Placar no painel <strong>Game Over</strong> do jogo. Clique em{' '}
+                  <strong>restart</strong> no canvas (ou <strong>Espaço</strong>) e depois
+                  toque de novo para jogar.
+                </>
+              ) : (
+                <>
+                  Tela <strong>Get Ready</strong> no canvas. Toque no jogo ou pressione{' '}
+                  <strong>Espaço</strong> / <strong>↑</strong> para começar.
+                </>
+              )
+            ) : (
+              <>
+                Pontuação no topo do canvas. <strong>Espaço</strong>, <strong>↑</strong> ou
+                clique para bater asa.
+              </>
+            )}
+          </p>
+          <Button size="sm" className="mt-2" onClick={onPlayerRestart}>
+            {state.playerAguardandoInicio
+              ? state.progresso.pontuacao > 0
+                ? 'Restart'
+                : 'Jogar'
+              : 'Reiniciar partida'}
+          </Button>
           <p className="text-[10px] text-muted-foreground">
             Volte para <strong className="text-foreground">IA</strong> para treinar a rede
-            neural (reinício automático ao morrer).
+            neural.
           </p>
         </div>
       ) : (
       <div className="grid min-h-0 flex-1 grid-cols-3 grid-rows-2 gap-2 p-2">
-        <PanelBlock title="👁 O que vê">
+        <PanelBlock title="👁 O que a IA vê">
           <div className="space-y-1.5">
             <MetricBar
               label="Cano"
@@ -279,6 +306,9 @@ export function NeuralPanel({
 
         <PanelBlock title="🎓 Pesos">
           <div className="space-y-1.5">
+            <p className="text-[9px] font-medium text-muted-foreground">
+              Em jogo agora
+            </p>
             <WeightRow
               label="Cano"
               value={state.pesos.w_distancia}
@@ -294,6 +324,34 @@ export function NeuralPanel({
               value={state.pesos.w_velocidade}
               pulse={state.pesoMudou}
             />
+
+            {state.campeaoHistorico ? (
+              <>
+                <p className="border-t border-border/60 pt-1.5 text-[9px] font-medium text-amber-400/90">
+                  Melhor campeão (hall {state.campeaoHistorico.score})
+                </p>
+                <WeightRow
+                  label="Cano"
+                  value={state.campeaoHistorico.pesos.w_distancia}
+                  variant="hall"
+                />
+                <WeightRow
+                  label="Altura"
+                  value={state.campeaoHistorico.pesos.w_altura}
+                  variant="hall"
+                />
+                <WeightRow
+                  label="Queda"
+                  value={state.campeaoHistorico.pesos.w_velocidade}
+                  variant="hall"
+                />
+              </>
+            ) : (
+              <p className="border-t border-border/60 pt-1.5 text-[9px] leading-snug text-muted-foreground">
+                O melhor genoma da história aparece aqui quando o hall of fame
+                registrar um campeão.
+              </p>
+            )}
           </div>
         </PanelBlock>
 
@@ -311,7 +369,7 @@ export function NeuralPanel({
           />
         </PanelBlock>
 
-        <PanelBlock title="⚙️ Rede" className="col-span-1">
+        <PanelBlock title="⚙️ Rede neural" className="col-span-1">
           <div className="flex h-full min-h-0 flex-col">
             <NetworkDiagram
               state={state}
@@ -344,26 +402,44 @@ export function NeuralPanel({
 function WeightRow({
   label,
   value,
-  pulse,
+  pulse = false,
+  variant = 'live',
 }: {
   label: string
   value: number
-  pulse: boolean
+  pulse?: boolean
+  variant?: 'live' | 'hall'
 }) {
   const pct = Math.min(100, (Math.abs(value) / 2) * 100)
+  const isHall = variant === 'hall'
   return (
-    <div className="grid grid-cols-[2.5rem_1fr_1.75rem_0.5rem] items-center gap-1 text-[10px]">
-      <span className="text-muted-foreground">{label}</span>
+    <div
+      className={cn(
+        'grid items-center gap-1 text-[10px]',
+        isHall
+          ? 'grid-cols-[2.5rem_1fr_1.75rem]'
+          : 'grid-cols-[2.5rem_1fr_1.75rem_0.5rem]'
+      )}
+    >
+      <span className={cn('text-muted-foreground', isHall && 'text-amber-200/70')}>
+        {label}
+      </span>
       <Progress
         value={pct}
         className="h-1.5"
-        indicatorClassName={value >= 0 ? 'bg-emerald-500' : 'bg-red-500'}
+        indicatorClassName={
+          isHall
+            ? 'bg-amber-500/80'
+            : value >= 0
+              ? 'bg-emerald-500'
+              : 'bg-red-500'
+        }
       />
-      <span className="tabular-nums">
+      <span className={cn('tabular-nums', isHall && 'text-amber-200/80')}>
         {value >= 0 ? '+' : ''}
         {value.toFixed(1)}
       </span>
-      <span className={cn(pulse && 'text-sky-400')}>●</span>
+      {!isHall && <span className={cn(pulse && 'text-sky-400')}>●</span>}
     </div>
   )
 }

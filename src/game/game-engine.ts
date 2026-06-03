@@ -14,7 +14,11 @@ import {
   birdSpriteFrame,
 } from '@/game/bird-sprites'
 import { HIDDEN_SIZE } from '@/lib/nn-architecture'
-import { NeuralNetwork } from '@/lib/neural-network'
+import {
+  aggregatedInputWeightsFromSnapshot,
+  NeuralNetwork,
+  type NetworkSnapshot,
+} from '@/lib/neural-network'
 import type { PanelState, PanelUiEvents } from '@/lib/panel-types'
 import {
   clearTrainingState,
@@ -22,10 +26,21 @@ import {
   saveTrainingState,
 } from '@/lib/training-storage'
 import { computeNnInputs } from '@/game/nn-inputs'
+import {
+  drawPlayerMedal,
+  drawPlayerScore,
+  GAME_OVER_SPRITE,
+  GET_READY_SPRITE,
+  isInsideStartBtn,
+} from '@/game/player-ui-sprites'
 import { getEvolutionLayout } from '@/lib/population-evolution'
 import type { PanelEvolucao } from '@/lib/panel-types'
 
 const DEGREE = Math.PI / 180
+/** Passos de simulação por frame no ultraturbo (sem desenho intermediário). */
+const ULTRA_BURST_STEPS = 24_000
+
+export type TrainingSpeedMode = 'normal' | 'ultra'
 export type RestoredTrainingInfo = {
   populationSize: number
   generation: number
@@ -54,14 +69,27 @@ export class GameEngine {
   private raf = 0
   private started = false
 
+  /**
+   * Turbo do treino (×1–×10): quantos passos de simulação por frame desenhado.
+   * Não altera física nem evolução por passo — só encurta o tempo de relógio por geração.
+   * Modo jogador ignora turbo (sempre ×1).
+   */
   gameSpeed = 1
   paused = false
   playerMode = false
   playerAwaitingStart = false
+  /** true após morte no modo jogador → painel Game Over (mesmo com 0 pontos). */
+  private playerShowGameOver = false
   private lastPlayerScore = 0
   private flapQueued = false
   private simAccumulator = 0
   private generationEnding = false
+  /** false após “Limpar” — evita regravar no localStorage (beforeunload / saveTraining). */
+  private persistTrainingEnabled = true
+  ultraTurbo = false
+  private ultraRedrawPending = true
+  private hallOfFameScore = 0
+  private hallOfFameSnapshot: NetworkSnapshot | null = null
 
   private training = {
     recorde: 0,
@@ -92,8 +120,34 @@ export class GameEngine {
   }
 
   setSpeed(speed: number) {
+    if (this.playerMode) {
+      this.gameSpeed = 1
+      return
+    }
+    if (this.ultraTurbo) return
     this.gameSpeed = Math.max(1, Math.min(10, Math.round(speed) || 1))
     this.simAccumulator = Math.min(this.simAccumulator, 1)
+  }
+
+  setUltraTurbo(enabled: boolean) {
+    if (this.playerMode) {
+      this.ultraTurbo = false
+      return
+    }
+    this.ultraTurbo = enabled
+    this.ultraRedrawPending = true
+    this.simAccumulator = 0
+    if (enabled) {
+      this.callbacks.onUiEvent({
+        genScoreMsg:
+          'Ultraturbo: simulação em rajada (sem desenho). Hall of fame preserva o melhor genoma — não garante zero falhas.',
+      })
+      setTimeout(() => this.callbacks.onUiEvent({ genScoreMsg: null }), 4000)
+    }
+  }
+
+  getUltraTurbo() {
+    return this.ultraTurbo
   }
 
   setPaused(paused: boolean) {
@@ -117,13 +171,16 @@ export class GameEngine {
   setPlayerMode(enabled: boolean) {
     this.playerMode = enabled
     this.flapQueued = false
-    this.playerAwaitingStart = false
+    this.playerAwaitingStart = enabled
     this.simAccumulator = 0
     this.paused = false
     this.generationEnding = false
 
     if (enabled) {
+      this.gameSpeed = 1
       this.population.resize(1)
+      this.lastPlayerScore = 0
+      this.playerShowGameOver = false
     }
 
     this.startFreshRun()
@@ -138,9 +195,17 @@ export class GameEngine {
     this.raf = requestAnimationFrame(this.loop)
   }
 
-  playerFlap() {
+  playerFlap(pointerX?: number, pointerY?: number) {
     if (!this.playerMode) return
     if (this.playerAwaitingStart) {
+      if (this.lastPlayerScore > 0) {
+        const fromPointer = pointerX !== undefined && pointerY !== undefined
+        if (fromPointer && !isInsideStartBtn(pointerX, pointerY)) return
+        this.lastPlayerScore = 0
+        this.playerShowGameOver = false
+        this.startFreshRun()
+        return
+      }
       this.startPlayerRun()
       return
     }
@@ -150,13 +215,20 @@ export class GameEngine {
 
   private startPlayerRun() {
     this.playerAwaitingStart = false
+    this.playerShowGameOver = false
     this.paused = false
     this.simAccumulator = 0
+    this.gameSpeed = 1
     this.startFreshRun()
+    const i = this.population.championIndex
+    this.population.y[i] = 150
+    this.population.speed[i] = 0
+    this.flapQueued = true
     this.callbacks.onUiEvent({ genScoreMsg: null })
   }
 
   clearTraining() {
+    this.persistTrainingEnabled = false
     clearTrainingState()
     this.training = {
       recorde: 0,
@@ -166,12 +238,25 @@ export class GameEngine {
       lastBest: 0,
       vivos: 0,
     }
+    this.playerMode = false
+    this.playerAwaitingStart = false
+    this.lastPlayerScore = 0
+    this.playerShowGameOver = false
+    this.flapQueued = false
+    this.paused = false
+    this.gameSpeed = 1
+    this.simAccumulator = 0
+    this.generationEnding = false
+    this.ultraTurbo = false
+    this.ultraRedrawPending = true
+    this.hallOfFameScore = 0
+    this.hallOfFameSnapshot = null
     this.population.setGeneration(1)
     this.population.clearLineage()
-    if (!this.playerMode) {
-      this.population.resize(1, { preserveChampion: false })
-    }
+    this.population.resize(1, { preserveChampion: false })
     this.startFreshRun()
+    this.syncDisplayFromChampion()
+    this.restartLoopIfNeeded()
     this.callbacks.onUiEvent({
       genScoreMsg: 'Aprendizado zerado — treino recomeçou do zero',
     })
@@ -202,7 +287,7 @@ export class GameEngine {
   }
 
   private saveTraining() {
-    if (this.playerMode) return
+    if (this.playerMode || !this.persistTrainingEnabled) return
     saveTrainingState({
       populationSize: this.population.size,
       generation: this.population.getGeneration(),
@@ -213,6 +298,8 @@ export class GameEngine {
       championIndex: this.population.championIndex,
       rngState: this.population.getRngState(),
       networks: this.population.exportSnapshots(),
+      hallOfFame: this.hallOfFameScore,
+      hallOfFameSnapshot: this.hallOfFameSnapshot,
     })
   }
 
@@ -243,9 +330,19 @@ export class GameEngine {
     this.training.historico = [...saved.historico]
     this.training.lastAvg = saved.lastAvg
     this.training.lastBest = saved.lastBest
+    if (typeof saved.hallOfFame === 'number' && saved.hallOfFame > 0) {
+      this.hallOfFameScore = saved.hallOfFame
+      this.hallOfFameSnapshot = saved.hallOfFameSnapshot ?? null
+      this.installHallOfFameChampion(saved.lastBest)
+    }
+
+    // Padrão: 1 pássaro na UI/motor; mantém o campeão do treino salvo
+    if (this.population.size !== 1) {
+      this.population.resize(1, { preserveChampion: true })
+    }
 
     this.callbacks.onRestored?.({
-      populationSize: saved.populationSize,
+      populationSize: 1,
       generation: saved.generation,
       recorde: saved.recorde,
       historicoLength: saved.historico.length,
@@ -354,9 +451,18 @@ export class GameEngine {
       hiddenDetail.push(this.displayNn.getHiddenNeuronDetail(i))
     }
 
+    const campeaoHistorico =
+      this.hallOfFameScore > 0 && this.hallOfFameSnapshot
+        ? {
+            score: this.hallOfFameScore,
+            pesos: aggregatedInputWeightsFromSnapshot(this.hallOfFameSnapshot),
+          }
+        : null
+
     return {
       inputs: inp,
       pesos: this.displayNn.getAggregatedInputWeights(),
+      campeaoHistorico,
       calculo,
       progresso: {
         geracao: this.population.getGeneration(),
@@ -370,6 +476,7 @@ export class GameEngine {
         vivos: this.training.vivos,
         melhorGeracao: this.currentBestScore(),
         mediaGeracao: this.currentAvgScore() || this.training.lastAvg,
+        hallOfFame: this.hallOfFameScore,
       },
       diagram: this.displayNn.getActivationsForDiagram(),
       weights: this.displayNn.getAllWeights(),
@@ -383,8 +490,10 @@ export class GameEngine {
   }
 
   private onPlayerDeath() {
-    const score = this.population.score[0] ?? 0
+    const idx = this.population.championIndex
+    const score = this.population.score[idx] ?? 0
     this.lastPlayerScore = score
+    this.playerShowGameOver = true
 
     if (score > this.training.recorde) {
       this.training.recorde = score
@@ -398,35 +507,77 @@ export class GameEngine {
     this.playerAwaitingStart = true
   }
 
-  private drawPlayerStartOverlay() {
+  /** Telas Get Ready / Game Over do sprite original (modo jogador). */
+  private drawClassicPlayerScreen() {
     const { ctx } = this
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.55)'
-    ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT)
 
-    const score = this.lastPlayerScore
-    ctx.textAlign = 'center'
-    ctx.fillStyle = '#e2e8f0'
-    ctx.strokeStyle = '#000'
-    ctx.lineWidth = 3
-
-    ctx.font = 'bold 42px Teko, sans-serif'
-    const title = score > 0 ? 'FIM DE JOGO' : 'FLAPPY BIRD'
-    ctx.strokeText(title, GAME_WIDTH / 2, GAME_HEIGHT / 2 - 56)
-    ctx.fillText(title, GAME_WIDTH / 2, GAME_HEIGHT / 2 - 56)
-
-    if (score > 0) {
-      ctx.font = '28px Teko, sans-serif'
-      const pts = `${score} ponto${score === 1 ? '' : 's'}`
-      ctx.strokeText(pts, GAME_WIDTH / 2, GAME_HEIGHT / 2 - 12)
-      ctx.fillText(pts, GAME_WIDTH / 2, GAME_HEIGHT / 2 - 12)
+    if (this.playerShowGameOver) {
+      const g = GAME_OVER_SPRITE
+      ctx.drawImage(
+        this.sprite,
+        g.sX,
+        g.sY,
+        g.w,
+        g.h,
+        g.x,
+        g.y,
+        g.w,
+        g.h
+      )
+      drawPlayerScore(
+        ctx,
+        'gameover',
+        this.lastPlayerScore,
+        this.training.recorde
+      )
+      drawPlayerMedal(ctx, this.sprite, this.lastPlayerScore)
+    } else {
+      const r = GET_READY_SPRITE
+      ctx.drawImage(
+        this.sprite,
+        r.sX,
+        r.sY,
+        r.w,
+        r.h,
+        r.x,
+        r.y,
+        r.w,
+        r.h
+      )
     }
+  }
 
-    ctx.font = '18px Teko, sans-serif'
-    const hint = 'Clique ou Espaço para jogar'
-    ctx.strokeText(hint, GAME_WIDTH / 2, GAME_HEIGHT / 2 + 36)
-    ctx.fillText(hint, GAME_WIDTH / 2, GAME_HEIGHT / 2 + 36)
+  private syncPlayerIdleBird() {
+    if (!this.playerMode || !this.playerAwaitingStart) return
+    const i = this.population.championIndex
+    this.population.y[i] = 150
+    this.population.speed[i] = 0
+  }
 
-    ctx.textAlign = 'left'
+  private updateHallOfFame(score: number, snapshot: NetworkSnapshot | null) {
+    if (!snapshot || score <= this.hallOfFameScore) return
+    this.hallOfFameScore = score
+    this.hallOfFameSnapshot = snapshot
+  }
+
+  /** Campeão = melhor genoma histórico (explora mutação leve só com 1 pássaro no recorde). */
+  private installHallOfFameChampion(generationBest: number) {
+    const snap = this.hallOfFameSnapshot
+    if (!snap || this.population.size === 0) return
+
+    const champ = new NeuralNetwork()
+    champ.loadSnapshot(snap)
+    if (
+      this.population.size === 1 &&
+      generationBest >= this.hallOfFameScore &&
+      this.hallOfFameScore >= 15
+    ) {
+      champ.mutate(0.035, 0.09)
+    }
+    this.population.networks[0] = champ
+    this.population.championIndex = 0
+    this.population.setRankedSnapshot(0, snap)
+    this.syncDisplayFromChampion()
   }
 
   private onGenerationComplete() {
@@ -448,10 +599,16 @@ export class GameEngine {
       return
     }
 
+    if (result.generationBestSnapshot) {
+      this.updateHallOfFame(result.bestScore, result.generationBestSnapshot)
+    }
+    this.installHallOfFameChampion(result.bestScore)
+
     this.simAccumulator = 0
     // Mundo novo + pássaros no início (evita renascer dentro de cano antigo)
     this.startFreshRun()
     this.generationEnding = false
+    this.ultraRedrawPending = true
 
     this.training.lastBest = result.bestScore
     this.training.lastAvg = result.avgScore
@@ -496,7 +653,12 @@ export class GameEngine {
       this.callbacks.onUiEvent({ backpropAdjusting: '' })
     }, 1400)
 
+    this.persistTrainingEnabled = true
     this.saveTraining()
+
+    if (this.ultraTurbo) {
+      this.callbacks.onState(this.buildPanelState())
+    }
   }
 
   private drawBirdSprite(
@@ -564,6 +726,21 @@ export class GameEngine {
     }
   }
 
+  /** Modo jogador: um pássaro sem destaque de campeão (visual original). */
+  private drawPlayerBird() {
+    const pop = this.population
+    const i = pop.championIndex
+    if (!pop.alive[i]) return
+    this.drawBirdSprite(
+      50,
+      pop.y[i],
+      pop.speed[i],
+      'yellow',
+      this.bird.frame,
+      false
+    )
+  }
+
   private draw() {
     const { ctx } = this
 
@@ -584,41 +761,75 @@ export class GameEngine {
     ctx.drawImage(this.sprite, 276, 0, 224, 112, fgX, this.fg.y, 224, 112)
     ctx.drawImage(this.sprite, 276, 0, 224, 112, fgX + 224, this.fg.y, 224, 112)
 
-    this.drawAllBirds()
+    this.syncPlayerIdleBird()
+
+    if (this.playerMode) {
+      this.drawPlayerBird()
+    } else {
+      this.drawAllBirds()
+    }
 
     const idx = this.population.championIndex
-    const score = this.playerAwaitingStart
-      ? this.lastPlayerScore
-      : this.population.score[idx]
+    const awaiting = this.playerMode && this.playerAwaitingStart
 
-    ctx.fillStyle = '#FFF'
-    ctx.strokeStyle = '#000'
-    ctx.lineWidth = 1
-    ctx.font = '35px Teko, sans-serif'
-    ctx.fillText(String(score), GAME_WIDTH / 2, 50)
-    ctx.strokeText(String(score), GAME_WIDTH / 2, 50)
+    if (this.playerMode) {
+      if (awaiting) {
+        this.drawClassicPlayerScreen()
+      } else {
+        drawPlayerScore(ctx, 'playing', this.population.score[idx], this.training.recorde)
+      }
+    } else {
+      const score = this.population.score[idx]
+      ctx.fillStyle = '#FFF'
+      ctx.strokeStyle = '#000'
+      ctx.lineWidth = 1
+      ctx.font = '35px Teko, sans-serif'
+      ctx.textAlign = 'center'
+      ctx.fillText(String(score), GAME_WIDTH / 2, 50)
+      ctx.strokeText(String(score), GAME_WIDTH / 2, 50)
+      ctx.textAlign = 'left'
 
-    ctx.font = '14px monospace'
-    ctx.fillStyle = 'rgba(0,0,0,0.35)'
-    ctx.fillRect(4, GAME_HEIGHT - 22, 130, 18)
-    ctx.fillStyle = '#e2e8f0'
-    const hud = this.playerMode
-      ? `Jogador · rec ${this.training.recorde} · ×${this.gameSpeed}`
-      : `${this.training.vivos}/${this.population.size} vivos · ×${this.gameSpeed}`
-    ctx.fillText(hud, 8, GAME_HEIGHT - 8)
-
-    if (this.playerMode && this.playerAwaitingStart) {
-      this.drawPlayerStartOverlay()
+      ctx.font = '14px monospace'
+      ctx.fillStyle = 'rgba(0,0,0,0.35)'
+      ctx.fillRect(4, GAME_HEIGHT - 22, 130, 18)
+      ctx.fillStyle = '#e2e8f0'
+      const speedLabel = this.ultraTurbo
+        ? 'UT'
+        : `×${this.gameSpeed}`
+      ctx.fillText(
+        `${this.training.vivos}/${this.population.size} vivos · ${speedLabel}`,
+        8,
+        GAME_HEIGHT - 8
+      )
     }
   }
 
   /**
    * dt em “frames de 60fps” (16,67ms).
-   * ×1 acumula ~1 unidade por frame real → ~60 passos/s em qualquer monitor.
+   * ×1 ≈ 1 passo de simulação por frame desenhado (~60 passos/s).
+   * ×N ≈ N passos por frame (turbo visual) — cada passo igual ao ×1 (scaled=1).
    */
   private runSimulationSteps(dt: number) {
     if (this.playerMode) {
       if (this.playerAwaitingStart) return
+    }
+
+    if (this.ultraTurbo) {
+      let steps = 0
+      while (steps < ULTRA_BURST_STEPS) {
+        steps++
+        const result = this.population.step(this.world, 1, {
+          playerControl: false,
+          playerFlap: false,
+        })
+        this.training.vivos = result.alive
+        if (result.allDead) {
+          this.onGenerationComplete()
+          break
+        }
+      }
+      this.syncDisplayFromChampion()
+      return
     }
 
     this.simAccumulator += dt * this.gameSpeed
@@ -633,6 +844,7 @@ export class GameEngine {
       if (this.playerMode) this.flapQueued = false
 
       const result = this.population.step(this.world, 1, {
+        playerControl: this.playerMode,
         playerFlap: flap,
       })
       this.training.vivos = result.alive
@@ -648,7 +860,7 @@ export class GameEngine {
       }
     }
 
-    this.bird.animTimer += steps
+    this.bird.animTimer += dt
     if (this.bird.animTimer >= 5) {
       this.bird.frame = (this.bird.frame + 1) % BIRD_YELLOW_FRAMES.length
       this.bird.animTimer = 0
@@ -656,7 +868,7 @@ export class GameEngine {
   }
 
   private shouldSyncPanel() {
-    const interval = this.paused ? 3 : this.gameSpeed >= 10 ? 8 : this.gameSpeed >= 5 ? 5 : 3
+    const interval = this.paused ? 6 : 3
     return this.frames % interval === 0
   }
 
@@ -667,14 +879,29 @@ export class GameEngine {
 
       const awaitingStart = this.playerMode && this.playerAwaitingStart
 
-      if (!this.paused && !awaitingStart) {
+      if (awaitingStart) {
+        this.bird.animTimer += dt
+        if (this.bird.animTimer >= 10) {
+          this.bird.frame =
+            (this.bird.frame + 1) % BIRD_YELLOW_FRAMES.length
+          this.bird.animTimer = 0
+        }
+      } else if (!this.paused) {
         this.runSimulationSteps(dt)
       }
 
-      this.draw()
+      const drawThisFrame =
+        !this.ultraTurbo ||
+        this.ultraRedrawPending ||
+        awaitingStart ||
+        this.paused
+      if (drawThisFrame) {
+        this.draw()
+        this.ultraRedrawPending = false
+      }
 
       this.frames++
-      if (this.shouldSyncPanel()) {
+      if (!this.ultraTurbo && this.shouldSyncPanel()) {
         this.callbacks.onState(this.buildPanelState())
       }
     } catch (err) {

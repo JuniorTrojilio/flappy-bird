@@ -21,6 +21,23 @@ function sigmoidDerivative(x: number) {
   return x * (1 - x)
 }
 
+/** Média dos pesos entrada→oculta por sentido (mesma leitura do painel). */
+export function aggregatedInputWeightsFromSnapshot(s: NetworkSnapshot) {
+  const w = [0, 0, 0]
+  for (let i = 0; i < INPUT_SIZE; i++) {
+    let sum = 0
+    for (let j = 0; j < HIDDEN_SIZE; j++) {
+      sum += s.ih[i * HIDDEN_SIZE + j]
+    }
+    w[i] = sum / HIDDEN_SIZE
+  }
+  return {
+    w_distancia: clamp(w[0], -2, 2),
+    w_altura: clamp(w[1], -2, 2),
+    w_velocidade: clamp(w[2], -2, 2),
+  }
+}
+
 export class NeuralNetwork {
   ih = new Float32Array(INPUT_SIZE * HIDDEN_SIZE)
   ho = new Float32Array(HIDDEN_SIZE * OUTPUT_SIZE)
@@ -125,19 +142,7 @@ export class NeuralNetwork {
   }
 
   getAggregatedInputWeights() {
-    const w = [0, 0, 0]
-    for (let i = 0; i < INPUT_SIZE; i++) {
-      let s = 0
-      for (let j = 0; j < HIDDEN_SIZE; j++) {
-        s += this.ih[i * HIDDEN_SIZE + j]
-      }
-      w[i] = s / HIDDEN_SIZE
-    }
-    return {
-      w_distancia: clamp(w[0], -2, 2),
-      w_altura: clamp(w[1], -2, 2),
-      w_velocidade: clamp(w[2], -2, 2),
-    }
+    return aggregatedInputWeightsFromSnapshot(this.toSnapshot())
   }
 
   trainOnDeath(idealFlap: boolean) {

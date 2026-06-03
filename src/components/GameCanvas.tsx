@@ -7,6 +7,7 @@ import type { PanelState, PanelUiEvents } from '@/lib/panel-types'
 
 type GameCanvasProps = {
   speed: number
+  ultraTurbo: boolean
   paused: boolean
   gameMode: GameMode
   ui: PanelUiEvents
@@ -18,6 +19,7 @@ type GameCanvasProps = {
 
 export function GameCanvas({
   speed,
+  ultraTurbo,
   paused,
   gameMode,
   ui,
@@ -30,11 +32,13 @@ export function GameCanvas({
   const engineRef = useRef<GameEngine | null>(null)
 
   const speedRef = useRef(speed)
+  const ultraTurboRef = useRef(ultraTurbo)
   const gameModeRef = useRef(gameMode)
   const onStateRef = useRef(onState)
   const onUiEventRef = useRef(onUiEvent)
   const onRestoredRef = useRef(onRestored)
   speedRef.current = speed
+  ultraTurboRef.current = ultraTurbo
   gameModeRef.current = gameMode
   onStateRef.current = onState
   onUiEventRef.current = onUiEvent
@@ -61,6 +65,10 @@ export function GameCanvas({
   useEffect(() => {
     engineRef.current?.setSpeed(speed)
   }, [speed])
+
+  useEffect(() => {
+    engineRef.current?.setUltraTurbo(ultraTurbo)
+  }, [ultraTurbo])
 
   useEffect(() => {
     engineRef.current?.setPaused(paused)
@@ -98,10 +106,14 @@ export function GameCanvas({
           height={GAME_HEIGHT}
           className="block cursor-pointer border border-black shadow-2xl"
           style={{ width: GAME_WIDTH, height: GAME_HEIGHT }}
-          onPointerDown={() => {
-            if (gameModeRef.current === 'player') {
-              engineRef.current?.playerFlap()
-            }
+          onPointerDown={(e) => {
+            if (gameModeRef.current !== 'player') return
+            const canvas = canvasRef.current
+            if (!canvas) return
+            const rect = canvas.getBoundingClientRect()
+            const x = ((e.clientX - rect.left) / rect.width) * GAME_WIDTH
+            const y = ((e.clientY - rect.top) / rect.height) * GAME_HEIGHT
+            engineRef.current?.playerFlap(x, y)
           }}
           tabIndex={gameMode === 'player' ? 0 : -1}
           role="button"

@@ -18,15 +18,27 @@ export function MetricBar({
 }: MetricBarProps) {
   const pct = (displayValue ?? value) * 100
   return (
-    <div className="grid grid-cols-[3.5rem_1fr_3.5rem] items-center gap-2 text-xs">
-      <span className={cn('text-muted-foreground', danger && 'text-red-400')}>
+    <div className="flex items-center gap-2 text-xs">
+      <span
+        className={cn(
+          'w-14 shrink-0 text-muted-foreground',
+          danger && 'text-red-400'
+        )}
+      >
         {label}
       </span>
-      <Progress
-        value={pct}
-        indicatorClassName={cn(danger ? 'bg-red-500' : 'bg-primary')}
-      />
-      <span className="text-right text-muted-foreground">{status}</span>
+      <div className="min-w-0 flex-1">
+        <Progress
+          value={pct}
+          indicatorClassName={cn(danger ? 'bg-red-500' : 'bg-primary')}
+        />
+      </div>
+      <span
+        className="w-21 shrink-0 text-right text-[10px] leading-tight text-muted-foreground"
+        title={status}
+      >
+        {status}
+      </span>
     </div>
   )
 }

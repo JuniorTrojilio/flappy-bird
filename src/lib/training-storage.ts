@@ -2,6 +2,8 @@ import { HIDDEN_SIZE, INPUT_SIZE, OUTPUT_SIZE } from '@/lib/nn-architecture'
 import type { NetworkSnapshot } from '@/lib/neural-network'
 
 const STORAGE_KEY = 'flappy-bird-nn-training'
+/** Recorde do index.html legado (modo jogador manual). */
+const LEGACY_BEST_KEY = 'best'
 const SAVE_VERSION = 2
 const MAX_HISTORICO = 400
 
@@ -17,6 +19,8 @@ export type TrainingSaveData = {
   championIndex: number
   rngState: number
   networks: NetworkSnapshot[]
+  hallOfFame?: number
+  hallOfFameSnapshot?: NetworkSnapshot | null
 }
 
 export function saveTrainingState(data: Omit<TrainingSaveData, 'version' | 'savedAt'>): boolean {
@@ -70,7 +74,18 @@ export function loadTrainingState(): TrainingSaveData | null {
 }
 
 export function clearTrainingState() {
-  localStorage.removeItem(STORAGE_KEY)
+  try {
+    localStorage.removeItem(STORAGE_KEY)
+    localStorage.removeItem(LEGACY_BEST_KEY)
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const key = localStorage.key(i)
+      if (key?.startsWith('flappy-bird')) {
+        localStorage.removeItem(key)
+      }
+    }
+  } catch {
+    /* quota / modo privado */
+  }
 }
 
 export function hasSavedTraining() {

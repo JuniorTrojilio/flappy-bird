@@ -5,6 +5,7 @@ import { GAME_WIDTH } from '@/game/constants'
 import type { GameEngine, GameMode } from '@/game/game-engine'
 import { clampPopulationSize } from '@/game/population-mode'
 import type { PanelState, PanelUiEvents } from '@/lib/panel-types'
+import { clearTrainingState } from '@/lib/training-storage'
 
 /** Largura fixa da coluna do jogo (canvas + padding lateral) */
 const GAME_COLUMN_WIDTH = GAME_WIDTH + 48
@@ -22,38 +23,59 @@ export default function App() {
   const [panelState, setPanelState] = useState<PanelState | null>(null)
   const [ui, setUi] = useState<PanelUiEvents>(initialUi)
   const [speed, setSpeed] = useState(1)
+  const [ultraTurbo, setUltraTurbo] = useState(false)
   const [paused, setPaused] = useState(false)
   const [gameMode, setGameMode] = useState<GameMode>('ai')
   const [populationSize, setPopulationSize] = useState(1)
   const frameRef = useRef(0)
+  const speedRef = useRef(speed)
+  speedRef.current = speed
   const [slowSnapshot, setSlowSnapshot] = useState<PanelState | null>(null)
   const engineRef = useRef<GameEngine | null>(null)
 
   const onState = useCallback((state: PanelState) => {
     setPanelState(state)
     frameRef.current++
-    const slowEvery = speed >= 10 ? 3 : speed >= 5 ? 2 : 2
-    if (frameRef.current % slowEvery === 0) {
+    if (frameRef.current % 2 === 0) {
       setSlowSnapshot(state)
     }
-  }, [speed])
+  }, [])
 
-  const panelForSlow = slowSnapshot ?? panelState
-  const slowSections = speed < 5 ? panelForSlow : slowSnapshot
+  /** Turbo (×5+) só no motor; painel usa snapshot leve ou estado ao vivo. */
+  const slowSections =
+    speed >= 5 ? (slowSnapshot ?? panelState) : panelState
+
+  const handleSpeedChange = useCallback((next: number) => {
+    setSlowSnapshot(null)
+    setUltraTurbo(false)
+    engineRef.current?.setUltraTurbo(false)
+    setSpeed(next)
+  }, [])
+
+  const handleUltraTurboToggle = useCallback(() => {
+    const next = !ultraTurbo
+    setUltraTurbo(next)
+    setSlowSnapshot(null)
+    engineRef.current?.setUltraTurbo(next)
+    if (next) setSpeed(1)
+  }, [ultraTurbo])
 
   const onUiEvent = useCallback((patch: Partial<PanelUiEvents>) => {
     setUi((prev) => ({ ...prev, ...patch }))
   }, [])
 
-  const handleModeChange = useCallback((mode: GameMode) => {
-    setGameMode(mode)
-    setPaused(false)
-    if (mode === 'player') {
-      setPopulationSize(1)
-      setSpeed(1)
-    }
-    engineRef.current?.setPlayerMode(mode === 'player')
-  }, [])
+  const handleModeChange = useCallback(
+    (mode: GameMode) => {
+      setGameMode(mode)
+      setPaused(false)
+      if (mode === 'player') {
+        setPopulationSize(1)
+        handleSpeedChange(1)
+      }
+      engineRef.current?.setPlayerMode(mode === 'player')
+    },
+    [handleSpeedChange]
+  )
 
   const handlePopulationApply = useCallback(
     (n: number) => {
@@ -76,9 +98,13 @@ export default function App() {
     ) {
       return
     }
+    clearTrainingState()
     engineRef.current?.clearTraining()
     setPopulationSize(1)
     setGameMode('ai')
+    setSpeed(1)
+    setUltraTurbo(false)
+    setPaused(false)
     setUi(initialUi)
     setPanelState(null)
     setSlowSnapshot(null)
@@ -93,6 +119,7 @@ export default function App() {
       >
         <GameCanvas
           speed={speed}
+          ultraTurbo={ultraTurbo}
           paused={paused}
           gameMode={gameMode}
           ui={ui}
@@ -101,9 +128,7 @@ export default function App() {
           onEngineReady={(engine) => {
             engineRef.current = engine
           }}
-          onRestored={(info) =>
-            setPopulationSize(clampPopulationSize(info.populationSize))
-          }
+          onRestored={() => setPopulationSize(1)}
         />
       </aside>
       <main className="min-w-0 flex-1 h-full">
@@ -113,8 +138,10 @@ export default function App() {
           ui={ui}
           paused={paused}
           speed={speed}
+          ultraTurbo={ultraTurbo}
           gameMode={gameMode}
-          onSpeedChange={setSpeed}
+          onSpeedChange={handleSpeedChange}
+          onUltraTurboToggle={handleUltraTurboToggle}
           onPauseToggle={() => setPaused((p) => !p)}
           onModeChange={handleModeChange}
           onClearTraining={handleClearTraining}

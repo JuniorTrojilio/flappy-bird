@@ -37,7 +37,9 @@ export type PopulationStepResult = {
 }
 
 export type PopulationStepOptions = {
-  /** Modo jogador: asa na tecla/clique em vez da rede */
+  /** Modo jogador ativo (não usar rede para bater asa) */
+  playerControl?: boolean
+  /** Neste passo o jogador pediu asa (tecla/clique) */
   playerFlap?: boolean
 }
 
@@ -51,6 +53,8 @@ export type GenerationEndResult = {
   avgScore: number
   bestIndex: number
   generation: number
+  /** Rede do melhor pássaro desta geração (antes da mutação). */
+  generationBestSnapshot: NetworkSnapshot | null
 }
 
 export const POPULATION_MIN = 1
@@ -175,6 +179,12 @@ export class PopulationMode {
     this.rankedSnapshots = []
   }
 
+  setRankedSnapshot(index: number, snapshot: NetworkSnapshot) {
+    const next = [...this.rankedSnapshots]
+    next[index] = snapshot
+    this.rankedSnapshots = next
+  }
+
   getChampionNetwork() {
     return this.networks[this.championIndex] ?? this.networks[0]
   }
@@ -292,9 +302,13 @@ export class PopulationMode {
       nn.setInputs(inp.distancia_cano, inp.altura_passaro, inp.velocidade)
       nn.forward()
 
-      const shouldFlap = opts?.playerFlap
-        ? this.y[i] > MIN_Y && !touchesGround(this.y[i])
-        : nn.decide() === 'bate' && this.y[i] > MIN_Y && !touchesGround(this.y[i])
+      const shouldFlap = opts?.playerControl
+        ? !!opts.playerFlap &&
+          this.y[i] > MIN_Y &&
+          !touchesGround(this.y[i])
+        : nn.decide() === 'bate' &&
+          this.y[i] > MIN_Y &&
+          !touchesGround(this.y[i])
 
       if (shouldFlap) {
         this.speed[i] = -JUMP
@@ -356,6 +370,7 @@ export class PopulationMode {
       avgScore: evolved.avgScore,
       bestIndex: evolved.bestIndex,
       generation: this.generation,
+      generationBestSnapshot: this.rankedSnapshots[0] ?? null,
     }
   }
 
